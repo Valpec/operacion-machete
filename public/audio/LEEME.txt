@@ -1,0 +1,43 @@
+AUDIO OPCIONAL
+==============
+
+El juego genera todos sus sonidos por código (src/audio/sintesis.js), así que esta
+carpeta puede quedar vacía.
+
+Para reemplazar un sonido por un archivo propio:
+
+1. Copiá el archivo acá (por ejemplo: public/audio/paso.ogg). Sirven .ogg, .mp3 o .wav.
+2. Creá public/audio/sonidos.json (podés copiar sonidos.ejemplo.json) con el nombre
+   del sonido y el archivo:
+
+   {
+     "paso": "paso.ogg",
+     "timbre": "timbre-escuela.mp3"
+   }
+
+Nombres disponibles:
+  paso         pasos de la profesora (posicional). Un golpe corto se repite en cada paso;
+               una grabación larga suena en loop mientras ella camina
+  lapicera     golpe de lapicera de Sofi (posicional)
+  papel        abrir/arrugar el papelito
+  papelCae     papelito que cae (posicional)
+  soplido      lanzamiento de un papelito
+  latido       un latido ("lub-dub") que se repite según el pánico, o una grabación
+               larga que suena en loop (más fuerte y rápida con el pánico)
+  respiracion  respiración agitada (loop)
+  timbre       timbre del final
+  ambiente     rumor del aula (loop)
+  escritura    compañeros escribiendo (loop, posicional)
+  destello     campanita de los destellos de memoria
+  vibracion    vibración del celular
+  tela         sacar el machete de la manga
+  cierre       abrir la cartuchera
+  susurro      cuchicheos de compañeros al fondo del aula (loop, posicional; sólo con archivo)
+  hablaProfe   voz de la profesora: se reproduce un fragmento al azar cuando habla
+               (al empezar, al venir a tu banco, al retirarte el examen; sólo con archivo)
+
+Los archivos se normalizan al cargarse. Para subir o bajar uno en particular:
+  "paso": { "archivo": "paso.wav", "ganancia": 1.5 }
+Los volúmenes generales de cada sonido están en src/data/balance.json -> "audio".
+
+Los que no figuren en sonidos.json siguen siendo procedurales.

@@ -1,0 +1,75 @@
+/* ================= Señas, papelitos y machete ================= */
+.hud [hidden] { display: none !important; }
+
+/* Progreso de lectura alrededor de la mira */
+.hud-lectura { left: 50%; top: 50%; transform: translate(-50%, -27px); display: flex; flex-direction: column; align-items: center; }
+.lectura-anillo {
+  --p: 0%;
+  width: 54px; height: 54px; border-radius: 50%;
+  background: conic-gradient(#ffe066 var(--p), rgba(255, 255, 255, 0.18) 0);
+  -webkit-mask: radial-gradient(circle, transparent 21px, #000 22px);
+          mask: radial-gradient(circle, transparent 21px, #000 22px);
+}
+.lectura-texto { margin-top: 6px; font-size: 13px; font-weight: 700; background: rgba(16, 14, 28, 0.6); padding: 2px 8px; border-radius: 6px; white-space: nowrap; }
+
+/* Fuerza del lanzamiento */
+.hud-fuerza { left: 50%; top: calc(50% + 46px); transform: translateX(-50%); width: 180px; text-align: center; }
+.fuerza-barra { height: 10px; border-radius: 5px; background: rgba(255, 255, 255, 0.2); overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.5); }
+.fuerza-relleno { height: 100%; width: 0; background: linear-gradient(90deg, #8be28b, #ffe066, #ff8a5c); }
+.fuerza-texto { margin-top: 3px; font-size: 13px; font-weight: 700; }
+
+/* Pedido pendiente */
+.hud-pedido { top: 70px; left: 14px; max-width: 330px; padding: 8px 12px; background: #fbf8ef; color: #23202e; text-shadow: none; border-radius: 4px; font-size: 14px; transform: rotate(-1.5deg); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35); }
+
+/* Mensaje destacado */
+.hud-mensaje { top: 74px; left: 50%; transform: translate(-50%, -8px); max-width: min(640px, calc(100% - 32px)); padding: 8px 16px; border-radius: 10px; background: rgba(16, 14, 28, 0.78); font-size: 16px; font-weight: 600; text-align: center; opacity: 0; transition: opacity 0.3s, transform 0.3s; }
+.hud-mensaje.visible { opacity: 1; transform: translate(-50%, 0); }
+
+/* Machete en primer plano */
+.machete { position: absolute; left: 4%; bottom: 0; width: min(360px, 42vw); visibility: hidden; pointer-events: none; }
+.machete-soporte { position: relative; margin-bottom: -4px; }
+.machete-papel { font-family: var(--fuente-mano); color: #1d2a6b; }
+.m-titulo { font-weight: 700; font-size: 15px; margin-top: 4px; }
+.m-lista { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 19px; }
+.m-item b { font-size: 21px; }
+.machete-etiqueta { position: absolute; left: 0; right: 0; top: -26px; text-align: center; font-size: 13px; font-weight: 700; color: #fff; text-shadow: 0 1px 3px #000; }
+
+/* Cartuchera: tela con cierre y el papelito adentro */
+.machete-cartuchera .machete-soporte {
+  padding: 22px 18px 34px; background: #3b4d7a; border-radius: 26px 26px 10px 10px; border: 3px solid #1c1a24;
+  background-image: repeating-linear-gradient(90deg, transparent 0 7px, rgba(255, 255, 255, 0.06) 7px 9px);
+}
+.machete-cartuchera .machete-soporte::before {
+  content: ""; position: absolute; left: 14px; right: 14px; top: 8px; height: 6px; border-radius: 3px;
+  background: repeating-linear-gradient(90deg, #c9c9c9 0 4px, #6b6b6b 4px 6px);
+}
+.machete-cartuchera .machete-papel {
+  background: #fffef4; padding: 10px 12px; transform: rotate(-2deg); border: 1px solid #ccc; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+  background-image: repeating-linear-gradient(180deg, transparent 0 21px, #cfdcef 21px 22px);
+}
+
+/* Manga: el puño del buzo blanco tapando una tira de papel */
+.machete-manga { width: min(320px, 38vw); }
+.machete-manga .machete-soporte { padding: 0 0 70px; }
+.machete-manga .machete-soporte::after {
+  content: ""; position: absolute; left: -20px; right: -30px; bottom: 0; height: 84px; background: #f4f4f2; border: 3px solid #1c1a24; border-radius: 40px 40px 0 0;
+  background-image: repeating-linear-gradient(90deg, transparent 0 6px, rgba(0, 0, 0, 0.06) 6px 8px);
+}
+.machete-manga .machete-papel { background: #fffef4; padding: 8px 12px 22px; transform: rotate(3deg); border: 1px solid #ccc; font-size: 0.92em; }
+
+/* Celular: pantalla con una app de notas (se lee mejor) */
+.machete-celular { width: min(250px, 32vw); }
+.machete-celular .machete-soporte { padding: 14px 10px 40px; background: #16161c; border-radius: 30px 30px 0 0; border: 3px solid #000; }
+.machete-celular .machete-papel { background: #fdfcf7; border-radius: 16px 16px 4px 4px; min-height: 260px; font-family: var(--fuente); color: #1b1b1b; overflow: hidden; }
+.cel-barra { display: flex; justify-content: space-between; padding: 6px 12px 2px; font-size: 11px; font-weight: 700; }
+.cel-app { padding: 2px 12px 6px; font-size: 20px; font-weight: 800; color: #e0a800; }
+.cel-nota { padding: 0 12px 12px; }
+.machete-celular .m-titulo { font-size: 16px; }
+.m-seccion { margin-top: 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: #777; }
+.machete-celular .m-lista { font-size: 20px; }
+
+/* Confirmación de guardar el machete */
+.confirmacion { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(15, 12, 25, 0.45); }
+.confirmacion[hidden] { display: none; }
+.confirmacion h2 { margin: 0 0 8px; font-family: var(--fuente-mano); }
+.opciones-confirmacion { display: flex; gap: 24px; justify-content: center; font-weight: 700; }

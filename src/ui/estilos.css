@@ -1,0 +1,72 @@
+/* Estilos generales del HUD y los menús (se superponen al canvas) */
+:root {
+  --papel: #fbf8ef;
+  --tinta: #1f1d2b;
+  --acento: #3a6ea5;
+  --peligro: #c0392b;
+  --calma: #2e8b57;
+  --sombra: rgba(15, 12, 25, 0.55);
+  --fuente: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --fuente-mano: 'Segoe Print', 'Comic Sans MS', 'Bradley Hand', cursive;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #111;
+  font-family: var(--fuente);
+  color: var(--tinta);
+  user-select: none;
+}
+
+#app canvas { display: block; }
+
+#ui {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+.pantalla {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--sombra);
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.tarjeta {
+  background: var(--papel);
+  border-radius: 10px;
+  padding: 28px 36px;
+  max-width: 620px;
+  width: calc(100% - 32px);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+  border: 2px solid var(--tinta);
+}
+
+.tarjeta h1 {
+  margin: 0 0 8px;
+  font-family: var(--fuente-mano);
+  font-size: 2.4rem;
+}
+
+/* Panel del modo debug */
+.debug-panel {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  padding: 10px 14px;
+  background: rgba(10, 12, 20, 0.78);
+  color: #e8f0ff;
+  font: 13px/1.5 Consolas, 'Courier New', monospace;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+.debug-ayuda { color: #9fb3d1; }

@@ -1,0 +1,71 @@
+/* ================= Menús, inicio y finales ================= */
+.menu { overflow-y: auto; padding: 16px; }
+.menu .tarjeta { max-height: calc(100vh - 32px); overflow-y: auto; }
+.tarjeta-ancha { max-width: 980px; }
+.tarjeta h2 { margin: 14px 0 6px; font-size: 1.05rem; text-transform: uppercase; letter-spacing: 0.05em; color: #5a5570; }
+.bajada { font-size: 1.05rem; line-height: 1.5; }
+.columnas { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+@media (max-width: 760px) { .columnas { grid-template-columns: 1fr; } }
+.columnas ul { margin: 0; padding-left: 20px; line-height: 1.5; }
+
+/* Elección del escondite */
+.escondites { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.escondite {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 3px; padding: 10px; text-align: left;
+  border: 2px solid #c9c3b3; border-radius: 10px; background: #fff; cursor: pointer; font: inherit; color: inherit;
+}
+.escondite[aria-checked='true'] { border-color: var(--tinta); background: #f1ecdd; box-shadow: inset 0 0 0 2px var(--tinta); }
+.escondite[aria-checked='true'] b::after { content: ' ✓'; }
+.esc-icono { font-size: 26px; }
+.esc-pro { color: #2a6b3c; font-size: 13px; }
+.esc-contra { color: #8a2f25; font-size: 13px; }
+
+/* Tabla de controles */
+.controles { border-collapse: collapse; font-size: 14px; width: 100%; }
+.controles td { padding: 4px 6px; vertical-align: top; border-bottom: 1px dashed #ddd6c4; }
+.controles td:first-child { white-space: nowrap; }
+.nota-auriculares { font-size: 13px; color: #555; }
+
+.botonera { display: flex; gap: 10px; justify-content: center; align-items: center; flex-wrap: wrap; margin-top: 16px; }
+.botonera.vertical { flex-direction: column; align-items: stretch; }
+.boton-secundario { padding: 9px 18px; font-size: 15px; font-weight: 600; border-radius: 9px; border: 2px solid var(--tinta); background: #fff; color: var(--tinta); cursor: pointer; }
+.boton-grande:hover, .boton-secundario:hover { filter: brightness(1.1); transform: translateY(-1px); }
+.aviso-lock { text-align: center; color: #8a2f25; font-weight: 600; }
+.aviso-lock[hidden] { display: none; }
+details { margin-top: 12px; }
+
+/* Opciones */
+.opcion { display: grid; grid-template-columns: 1fr 160px 56px; align-items: center; gap: 10px; margin: 10px 0; }
+.opcion output { text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; }
+.opcion.casilla { grid-template-columns: auto 1fr; }
+.opcion input[type='checkbox'] { width: 20px; height: 20px; }
+
+/* Fundido a negro */
+.fundido { position: absolute; inset: 0; background: #000; opacity: 0; pointer-events: none; }
+
+/* Finales */
+.pantalla-final { background: rgba(10, 12, 20, 0.35); }
+.pantalla-traicion { background: rgba(20, 28, 45, 0.45); }
+.pantalla-merito { background: rgba(255, 210, 140, 0.25); }
+.final { max-width: 640px; text-align: center; }
+.final h1 { font-size: 2.2rem; }
+.final-traicion h1 { color: #8a2f25; }
+.final-merito h1 { color: #2a6b3c; }
+.lineas p, .resultado-final { opacity: 0; animation: aparecer 0.9s ease forwards; }
+.lineas p { font-size: 1.1rem; margin: 8px 0; }
+@keyframes aparecer { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.nota-final { display: inline-flex; flex-direction: column; align-items: center; margin: 10px 0 4px; padding: 6px 26px; border: 3px solid var(--tinta); border-radius: 50%; }
+.nota-final b { font-family: var(--fuente-mano); font-size: 56px; line-height: 1.1; }
+.nota-final span { font-size: 13px; }
+.cierre { font-size: 1.15rem; font-weight: 700; }
+.estadisticas { list-style: none; padding: 0; margin: 6px 0; font-size: 14px; color: #555; }
+
+/* Inicio compacto: el botón de empezar siempre queda a la vista */
+.inicio .tarjeta { padding: 18px 26px 0; }
+.inicio h1 { font-size: 2rem; margin-bottom: 2px; }
+.inicio .bajada { font-size: 0.98rem; margin: 4px 0; }
+.inicio .tarjeta h2 { margin: 10px 0 4px; font-size: 0.95rem; }
+.inicio .columnas ul { font-size: 0.92rem; line-height: 1.4; }
+.inicio .controles { font-size: 13px; }
+.inicio .controles td { padding: 3px 5px; }
+.inicio .botonera { position: sticky; bottom: 0; margin: 10px -26px 0; padding: 12px 26px 16px; background: var(--papel); border-top: 1px solid #e3dccb; }

@@ -1,0 +1,140 @@
+{
+  "titulo": "Primer Parcial — Entornos Virtuales",
+  "preguntas": [
+    {
+      "enunciado": "¿Qué componente de una escena 3D define desde dónde y con qué ángulo se observa el mundo?",
+      "opciones": [
+        "La luz ambiental",
+        "La cámara",
+        "El material",
+        "La textura"
+      ],
+      "correcta": 1,
+      "claves": [
+        "desde dónde",
+        "con qué ángulo se observa"
+      ],
+      "recuerdo": "La profe lo repitió mil veces: «la cámara es el ojo del jugador»."
+    },
+    {
+      "enunciado": "En un videojuego, ¿cómo se llama el ciclo que actualiza la lógica y dibuja la imagen en cada cuadro?",
+      "opciones": [
+        "Bucle de juego (game loop)",
+        "Árbol de escena",
+        "Shader de vértices",
+        "Mapa de normales"
+      ],
+      "correcta": 0,
+      "claves": [
+        "ciclo",
+        "en cada cuadro"
+      ],
+      "recuerdo": "Actualizar, dibujar, repetir… el famoso «game loop»."
+    },
+    {
+      "enunciado": "¿Qué técnica imita el aspecto de un dibujo animado usando pocos tonos de iluminación?",
+      "opciones": [
+        "Ray tracing",
+        "Cel-shading",
+        "Bump mapping",
+        "Antialiasing"
+      ],
+      "correcta": 1,
+      "claves": [
+        "dibujo animado",
+        "pocos tonos"
+      ],
+      "recuerdo": "Sombras planas, como en las historietas: cel-shading."
+    },
+    {
+      "enunciado": "Una máquina de estados finitos aplicada a un personaje no jugable sirve para…",
+      "opciones": [
+        "Comprimir sus texturas",
+        "Organizar sus comportamientos y las transiciones entre ellos",
+        "Calcular sus colisiones con el piso",
+        "Reproducir su voz"
+      ],
+      "correcta": 1,
+      "claves": [
+        "máquina de estados",
+        "personaje no jugable"
+      ],
+      "recuerdo": "Patrullar, sospechar, inspeccionar… cada cosa que hace es un estado."
+    },
+    {
+      "enunciado": "¿Qué medida indica cuántas imágenes por segundo muestra un juego?",
+      "opciones": [
+        "RPM",
+        "DPI",
+        "Hz de audio",
+        "FPS"
+      ],
+      "correcta": 3,
+      "claves": [
+        "imágenes por segundo"
+      ],
+      "recuerdo": "Frames Per Second: cuadros por segundo."
+    },
+    {
+      "enunciado": "En diseño de juegos, la retroalimentación (feedback) es…",
+      "opciones": [
+        "El presupuesto del proyecto",
+        "La música de fondo del menú",
+        "La respuesta del juego que le informa al jugador el resultado de sus acciones",
+        "El guion de las escenas"
+      ],
+      "correcta": 2,
+      "claves": [
+        "retroalimentación",
+        "feedback"
+      ],
+      "recuerdo": "Cada acción del jugador tiene que tener una respuesta que se vea o se escuche."
+    },
+    {
+      "enunciado": "¿Qué recomienda la accesibilidad para no transmitir información importante solo con el color?",
+      "opciones": [
+        "Subir la saturación",
+        "Usar sólo rojo y verde",
+        "Combinar el color con formas, texto o íconos",
+        "Bajar el brillo de la pantalla"
+      ],
+      "correcta": 2,
+      "claves": [
+        "accesibilidad",
+        "solo con el color"
+      ],
+      "recuerdo": "Pensá en alguien daltónico: color + ícono + texto."
+    },
+    {
+      "enunciado": "La «curva de dificultad» de un juego describe…",
+      "opciones": [
+        "El tamaño del mapa",
+        "La resolución de la pantalla",
+        "La cantidad de jugadores en línea",
+        "Cómo aumenta el desafío a lo largo del juego"
+      ],
+      "correcta": 3,
+      "claves": [
+        "curva de dificultad"
+      ],
+      "recuerdo": "Empieza tranquilo y va subiendo… como este parcial."
+    }
+  ],
+  "machete": {
+    "_comentario": "Índices de preguntas (desde 0). 'propias': respuestas del jugador en el machete. 'paraAmigos': las que le corresponde pasar al grupo (los pedidos salen de acá). 'seniasPasan': las que Sofi le pasa por señas.",
+    "propias": [
+      1,
+      3,
+      4,
+      6
+    ],
+    "paraAmigos": [
+      2,
+      7
+    ],
+    "seniasPasan": [
+      0,
+      5
+    ]
+  }
+}

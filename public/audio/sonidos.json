@@ -1,0 +1,10 @@
+{
+  "_comentario": "Sonidos grabados que reemplazan a los procedurales. Cada uno se normaliza al cargarse; 'ganancia' ajusta el nivel de ese archivo (1 = normal). Los volúmenes generales están en src/data/balance.json (audio).",
+  "ambiente": "ambiente.wav",
+  "escritura": "lapicera.wav",
+  "latido": "latido.wav",
+  "paso": "paso.wav",
+  "respiracion": "respiracion.wav",
+  "susurro": "susurro.wav",
+  "hablaProfe": "wawa_habla.mp3"
+}

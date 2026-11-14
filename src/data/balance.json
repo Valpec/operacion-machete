@@ -1,0 +1,248 @@
+{
+  "camara": {
+    "fov": 60,
+    "cerca": 0.03,
+    "lejos": 60,
+    "giroHorizontalMax": 110,
+    "giroVerticalMin": -65,
+    "giroVerticalMax": 35,
+    "sensibilidad": 0.0022,
+    "alturaCuello": 1.14,
+    "offsetOjosY": 0.14,
+    "offsetOjosZ": -0.07
+  },
+  "aula": {
+    "columnas": 5,
+    "filas": 5,
+    "separacionColumnas": 2.2,
+    "separacionFilas": 1.5,
+    "anchoAula": 12,
+    "frenteZ": -7.5,
+    "fondoZ": 5.2,
+    "altoAula": 3.4,
+    "offsetSillaZ": 0.45,
+    "alturaBanco": 0.76,
+    "pasillosX": [
+      -5.3,
+      -3.3,
+      -1.1,
+      1.1,
+      3.3,
+      5.3
+    ],
+    "pasilloFrenteZ": -4.3,
+    "pasilloFondoZ": 4.4,
+    "puntoPizarron": [
+      1.2,
+      -6.3
+    ],
+    "puntoEscritorio": [
+      -0.5,
+      -6.3
+    ]
+  },
+  "profesora": {
+    "velocidadPatrulla": 0.85,
+    "velocidadSospecha": 1.15,
+    "velocidadDescubrimiento": 1.3,
+    "velocidadGiro": 5,
+    "distanciaPaso": 0.62,
+    "patrulla": [
+      {
+        "x": 1.2,
+        "z": -6.3,
+        "pausa": 7,
+        "mirar": "pizarron"
+      },
+      {
+        "x": 3.3,
+        "z": -4.3,
+        "pausa": 0
+      },
+      {
+        "x": 3.3,
+        "z": 4.4,
+        "pausa": 0
+      },
+      {
+        "x": -3.3,
+        "z": 4.4,
+        "pausa": 3,
+        "mirar": "alumnos"
+      },
+      {
+        "x": -3.3,
+        "z": -4.3,
+        "pausa": 0
+      },
+      {
+        "x": -0.5,
+        "z": -6.3,
+        "pausa": 6,
+        "mirar": "alumnos"
+      }
+    ],
+    "vision": {
+      "anguloTotal": 70,
+      "distancia": 7.5,
+      "intervalo": 0.1,
+      "atenuacionDistancia": 0.65
+    },
+    "escucha": {
+      "radio": 14,
+      "umbral": 0.25
+    },
+    "sospecha": {
+      "porSegundoViendoTrampa": 30,
+      "porRuido": 22,
+      "decaimiento": 2.5,
+      "decaimientoTrasInspeccion": 6,
+      "maxSinFlagrancia": 99,
+      "umbralInspeccionJugador": 60
+    },
+    "estados": {
+      "duracionSospechaMin": 12,
+      "duracionSospechaMax": 20,
+      "duracionInspeccionMin": 3,
+      "duracionInspeccionMax": 5,
+      "probSospechaEspontaneaBase": 0.004,
+      "probSospechaEspontaneaEscalada": 0.03,
+      "probInspeccion": 0.35,
+      "radioDeambularMax": 5.5,
+      "radioDeambularMin": 1.8,
+      "pausaDeambular": 1.5
+    },
+    "escalada": {
+      "duracionReferencia": 480,
+      "pesoIntercambio": 0.08,
+      "umbralActo3": 0.4
+    }
+  },
+  "examen": {
+    "duracion": 480,
+    "segundosParaDestello": 6,
+    "segundosParaRecuerdo": 10,
+    "notaAprobacion": 6,
+    "notaMaxima": 10
+  },
+  "hoja": {
+    "velocidadTransicion": 7,
+    "pitch": -1.05,
+    "sensibilidadCursor": 1.0
+  },
+  "hud": {
+    "radioIndicadorPasos": 4.5,
+    "duracionIndicador": 1.4,
+    "segundosAvisoTiempo": 60
+  },
+  "machete": {
+    "escondites": {
+      "cartuchera": {
+        "apertura": 1.0,
+        "legibilidad": 0.85,
+        "factorSospecha": 1.0,
+        "ruido": 0
+      },
+      "manga": {
+        "apertura": 0.25,
+        "legibilidad": 0.7,
+        "factorSospecha": 1.7,
+        "ruido": 0
+      },
+      "celular": {
+        "apertura": 0.5,
+        "legibilidad": 1.0,
+        "factorSospecha": 2.6,
+        "ruido": 0.12
+      }
+    },
+    "tiempoConsulta": 1.0,
+    "desenfoquePanicoPx": 5
+  },
+  "senias": {
+    "esperaInicial": 15,
+    "intervaloMin": 22,
+    "intervaloMax": 38,
+    "separacionGolpes": 0.32,
+    "intensidadGolpe": 0.12,
+    "duracionSenia": 7,
+    "ventanaRespuesta": 9,
+    "tiempoLectura": 1.0,
+    "toleranciaMirada": 24,
+    "probPedido": 0.45,
+    "distanciaProfeSegura": 6,
+    "panicoIlegible": 0.75
+  },
+  "papelitos": {
+    "esperaInicial": 30,
+    "intervaloMin": 35,
+    "intervaloMax": 55,
+    "tiempoVuelo": 1.15,
+    "errorLanzamiento": 0.12,
+    "gravedad": 9.8,
+    "radio": 0.035,
+    "rebote": 0.35,
+    "friccion": 2.5,
+    "radioAtrape": 0.85,
+    "ruidoCaida": 0.6,
+    "ruidoFallo": 1.0,
+    "sospechaPorFallo": 25,
+    "tiempoAbrir": 1.4,
+    "tiempoLimiteRespuesta": 40,
+    "radioExito": 0.9,
+    "vidaEnPiso": 12
+  },
+  "lanzamiento": {
+    "tiempoCarga": 1.1,
+    "velocidadMin": 3.5,
+    "velocidadMax": 10,
+    "anguloElevacion": 0.35,
+    "factorGiroBrazo": 1.18,
+    "temblorMax": 0.12,
+    "puntosArco": 48
+  },
+  "compromiso": {
+    "porSenia": 1,
+    "porPapelito": 1.5,
+    "porSegundoMachete": 0.05
+  },
+  "panico": {
+    "radio": 3.4,
+    "base": 0.35,
+    "velocidadSubida": 0.9,
+    "velocidadBajada": 0.3,
+    "velocidadBajadaHoja": 5,
+    "vibracionMax": 1.0
+  },
+  "efectos": {
+    "desenfoqueMaxPx": 9,
+    "vinetaBase": 0.22,
+    "tensionPorSospecha": 0.5
+  },
+  "audio": {
+    "volumenAmbiente": 0.15,
+    "volumenLatidoMax": 0.9,
+    "volumenRespiracionMax": 0.55,
+    "duckingPanico": 0.85,
+    "duckingHoja": 0.6,
+    "refDistancia": 1.5,
+    "rolloff": 1.4,
+    "volumenEscritura": 0.6,
+    "volumenPasos": 1.5,
+    "volumenSusurro": 0.6,
+    "volumenVozProfe": 1.0
+  },
+  "finales": {
+    "umbralCompromiso": 6,
+    "segundosIgnorandoParaMerito": 110,
+    "ignoradosMinimos": 2,
+    "demoraPasoProfesoraMerito": 5,
+    "desvioFalloFinal": 0.55,
+    "factorVelocidadFalloFinal": 0.55
+  },
+  "grupo": {
+    "intervaloMin": 25,
+    "intervaloMax": 45,
+    "duracionReclamo": 2.6
+  }
+}
