@@ -2,6 +2,27 @@ import { estado } from '../core/GameState.js';
 import { NOMBRES } from '../characters/config.js';
 
 const CLAVE_OPCIONES = 'elParcial.opciones';
+const CLAVE_SALTAR_INTRO = 'operacionMachete.saltarIntro';
+
+// "Jugar de nuevo" recarga la página: en ese caso se vuelve directo al menú, sin repetir la intro
+export function recargarSinIntro() {
+  try {
+    sessionStorage.setItem(CLAVE_SALTAR_INTRO, '1');
+  } catch {
+    /* sin almacenamiento */
+  }
+  location.reload();
+}
+function haySaltoDeIntro() {
+  const porURL = new URLSearchParams(location.search).get('intro') === '0';
+  try {
+    const guardado = sessionStorage.getItem(CLAVE_SALTAR_INTRO) === '1';
+    sessionStorage.removeItem(CLAVE_SALTAR_INTRO);
+    return porURL || guardado;
+  } catch {
+    return porURL;
+  }
+}
 
 // Lee/guarda opciones en localStorage (si el navegador lo bloquea, simplemente no se recuerdan)
 export function cargarOpciones(opciones) {
@@ -43,10 +64,11 @@ const CONTROLES_TEXTO = [
  * Pantallas HTML: inicio, pausa, opciones, fundido a negro y finales.
  */
 export class Pantallas {
-  constructor({ alEmpezar, alContinuar }) {
+  constructor({ alEmpezar, alContinuar, alVerIntro }) {
     this.ui = document.getElementById('ui');
     this.alEmpezar = alEmpezar;
     this.alContinuar = alContinuar;
+    this.alVerIntro = alVerIntro;
     this.escondite = estado.escondite;
     this.crearInicio();
     this.crearPausa();
@@ -66,24 +88,73 @@ export class Pantallas {
     return `<table class="controles">${CONTROLES_TEXTO.map(([k, v]) => `<tr><td><kbd>${k}</kbd></td><td>${v}</td></tr>`).join('')}</table>`;
   }
 
-  // ---------- Inicio ----------
+  // ---------- Bienvenida (el clic habilita el audio del navegador) ----------
+  crearBienvenida({ alEntrar }) {
+    const volver = haySaltoDeIntro();
+    this.bienvenida = this.div(
+      'pantalla splash',
+      `<h1 class="logo"><small>UTN FRC · Entornos Virtuales</small>Operación Machete</h1>
+       <p class="lema">Un parcial. Un grupo de amigos. Un plan para copiarse sin que la profe se dé cuenta.</p>
+       <p class="cargando">Cargando personajes…</p>
+       <button class="boton-grande" data-accion="entrar" hidden>${volver ? 'Volver al aula' : 'Hacé clic para empezar'}</button>
+       <button class="saltar-intro" data-accion="saltar" hidden>Saltar la intro e ir directo al menú</button>
+       <p class="nota-auriculares">🎧 Mejor con auriculares</p>`,
+    );
+    const entrar = this.bienvenida.querySelector('[data-accion="entrar"]');
+    const saltar = this.bienvenida.querySelector('[data-accion="saltar"]');
+    entrar.addEventListener('click', () => alEntrar(volver));
+    saltar.addEventListener('click', () => alEntrar(true));
+    this.bienvenidaProgreso = (n, total) => {
+      this.bienvenida.querySelector('.cargando').textContent = `Cargando personajes… ${n}/${total}`;
+    };
+    this.bienvenidaLista = () => {
+      this.bienvenida.querySelector('.cargando').textContent = '';
+      entrar.hidden = false;
+      saltar.hidden = volver;
+      entrar.focus();
+    };
+  }
+
+  ocultarBienvenida() {
+    this.bienvenida.style.display = 'none';
+  }
+
+  // ---------- Menú principal: cómo se juega, controles y escondite ----------
   crearInicio() {
     this.inicio = this.div(
       'pantalla menu inicio',
       `<div class="tarjeta tarjeta-ancha">
-        <h1>El Parcial</h1>
-        <p class="bajada">Estás rindiendo el primer parcial, sentado en el banco del medio. Desde las esquinas,
-          ${NOMBRES.senias}, ${NOMBRES.mensajero} y ${NOMBRES.grupo} quieren copiarse en grupo… y te necesitan a vos.
-          La profe patrulla el aula.</p>
+        <h1 class="logo"><small>Primer parcial</small>Operación Machete</h1>
+        <p class="bajada">Mañana de parcial. Te sentaron en el banco del medio, a la vista de todos. Desde las esquinas,
+          ${NOMBRES.senias} y ${NOMBRES.mensajero} esperan que les pases las respuestas de tu machete, y ${NOMBRES.grupo} te presiona desde adelante.
+          La profe patrulla el aula. En tu casa esperan un aprobado <i>sí o sí</i>.</p>
+        <div class="pestanas" role="tablist">
+          <button class="pestana" role="tab" data-pestana="como" aria-selected="true">Cómo se juega</button>
+          <button class="pestana" role="tab" data-pestana="controles" aria-selected="false">Controles</button>
+        </div>
         <div class="columnas">
-          <section>
-            <h2>Objetivos</h2>
-            <ul>
-              <li>Resolvé las 8 preguntas antes de que termine el tiempo (8 minutos).</li>
-              <li>Decidí: ¿seguís pasando respuestas (más riesgo y más pánico) o lo resolvés por tu cuenta?</li>
-              <li>Que la profe no te vea haciendo trampa: si la sospecha llega a 100 con las manos en la masa, se terminó.</li>
-              <li>Si te trabás con una pregunta, quedate mirándola: tu memoria te va a ayudar.</li>
+          <section class="panel-pestana" data-panel="como">
+            <h2>Objetivo</h2>
+            <ul class="mecanicas">
+              <li><span>📝</span><div>Respondé las <b>8 preguntas</b> en <b>8 minutos</b>. Mirar tu hoja te calma y nunca levanta sospechas.</div></li>
+              <li><span>💡</span><div>Si te trabás en una pregunta, quedate mirándola: <b>tu memoria</b> te ilumina las palabras clave. Sí estudiaste.</div></li>
+              <li><span>📄</span><div><b>Machete:</b> tiene tus respuestas y las que le debés al grupo. Abrirlo es trampa.</div></li>
+              <li><span>✋</span><div><b>${NOMBRES.senias}</b> (fondo izquierda) golpea la lapicera 3 veces y muestra dedos: 1=A, 2=B, 3=C, 4=D. Mirala para leerla.</div></li>
+              <li><span>🏀</span><div><b>${NOMBRES.mensajero}</b> (fondo derecha) te tira papelitos: atrapalos, leelos y devolvé la respuesta.</div></li>
+              <li><span>👩‍🏫</span><div><b>La profe</b> ve con un cono de visión y escucha los ruidos. Si te ve haciendo trampa con la sospecha al 100, te anula el examen.</div></li>
+              <li><span>💓</span><div><b>Pánico:</b> si está cerca mientras hacés trampa, se te nubla la vista y te tiembla el pulso.</div></li>
             </ul>
+            <div class="caminos">
+              <div class="camino-1"><b>Seguir con el grupo</b>Más riesgo, más nervios… ¿te van a bancar si te agarran?</div>
+              <div class="camino-2"><b>Cortar la red</b>Guardá el machete (G) y resolvelo por tu cuenta.</div>
+            </div>
+          </section>
+          <section class="panel-pestana" data-panel="controles" hidden>
+            <h2>Controles</h2>
+            ${this.tablaControles()}
+            <p class="nota-auriculares">🎧 Los pasos de la profe se escuchan en estéreo (además hay indicadores y subtítulos).</p>
+          </section>
+          <section>
             <h2>¿Dónde escondés el machete?</h2>
             <div class="escondites" role="radiogroup">
               ${ESCONDITES.map(
@@ -93,24 +164,27 @@ export class Pantallas {
                 </button>`,
               ).join('')}
             </div>
-          </section>
-          <section>
-            <h2>Controles</h2>
-            ${this.tablaControles()}
-            <p class="nota-auriculares">🎧 Recomendado: auriculares. Los pasos de la profe se escuchan en estéreo
-              (y además aparecen indicadores y subtítulos).</p>
+            <p class="nota-chat" hidden>Es lo que le dijiste al grupo anoche. Todavía podés cambiarlo.</p>
+            <h2>Antes de empezar</h2>
+            <ul class="mecanicas">
+              <li><span>🖱️</span><div>Al empezar se captura el mouse para mirar alrededor. <b>Esc</b> lo suelta y pausa.</div></li>
+              <li><span>🪑</span><div>Estás sentado: podés girar la cabeza, pero no darte vuelta del todo.</div></li>
+            </ul>
           </section>
         </div>
         <div class="botonera">
           <button class="boton-grande" data-accion="empezar">Empezar el examen</button>
           <button class="boton-secundario" data-accion="opciones">Opciones</button>
+          <button class="boton-secundario" data-accion="intro">Ver la intro de nuevo</button>
         </div>
         <p class="aviso-lock" hidden>Hacé clic de nuevo para tomar el control del mouse.</p>
       </div>`,
     );
     this.inicio.style.cursor = 'default';
+    this.inicio.style.display = 'none';
     const marcar = () =>
       this.inicio.querySelectorAll('.escondite').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.id === this.escondite)));
+    this.marcarEscondite = marcar;
     this.inicio.querySelectorAll('.escondite').forEach((b) =>
       b.addEventListener('click', () => {
         this.escondite = b.dataset.id;
@@ -118,11 +192,30 @@ export class Pantallas {
       }),
     );
     marcar();
+    // Pestañas: "Cómo se juega" / "Controles"
+    this.inicio.querySelectorAll('.pestana').forEach((b) =>
+      b.addEventListener('click', () => {
+        this.inicio.querySelectorAll('.pestana').forEach((x) => x.setAttribute('aria-selected', String(x === b)));
+        this.inicio.querySelectorAll('.panel-pestana').forEach((panel) => (panel.hidden = panel.dataset.panel !== b.dataset.pestana));
+      }),
+    );
     this.inicio.querySelector('[data-accion="empezar"]').addEventListener('click', () => {
       estado.escondite = this.escondite;
       this.alEmpezar().catch(() => (this.inicio.querySelector('.aviso-lock').hidden = false));
     });
     this.inicio.querySelector('[data-accion="opciones"]').addEventListener('click', () => this.mostrarOpciones(this.inicio));
+    this.inicio.querySelector('[data-accion="intro"]').addEventListener('click', () => this.alVerIntro?.());
+  }
+
+  // Muestra el menú; si el jugador eligió escondite en el chat, queda preseleccionado
+  mostrarInicio(esconditeDelChat) {
+    if (esconditeDelChat) {
+      this.escondite = esconditeDelChat;
+      this.marcarEscondite();
+    }
+    this.inicio.querySelector('.nota-chat').hidden = !esconditeDelChat;
+    this.inicio.style.display = 'flex';
+    this.inicio.querySelector('[data-accion="empezar"]').focus();
   }
 
   ocultarInicio() {
@@ -150,7 +243,7 @@ export class Pantallas {
       this.alContinuar().catch(() => (this.pausa.querySelector('.aviso-lock').hidden = false));
     });
     this.pausa.querySelector('[data-accion="opciones"]').addEventListener('click', () => this.mostrarOpciones(this.pausa));
-    this.pausa.querySelector('[data-accion="reiniciar"]').addEventListener('click', () => location.reload());
+    this.pausa.querySelector('[data-accion="reiniciar"]').addEventListener('click', () => recargarSinIntro());
   }
 
   mostrarPausa(visible) {
@@ -275,7 +368,7 @@ export class Pantallas {
       </div>`;
     this.final = this.div(`pantalla menu pantalla-final pantalla-${tipo}`, html);
     this.final.style.cursor = 'default';
-    this.final.querySelector('[data-accion="denuevo"]').addEventListener('click', () => location.reload());
+    this.final.querySelector('[data-accion="denuevo"]').addEventListener('click', () => recargarSinIntro());
     this.pausa.style.display = 'none';
   }
 }

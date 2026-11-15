@@ -47,6 +47,12 @@
     "velocidadDescubrimiento": 1.3,
     "velocidadGiro": 5,
     "distanciaPaso": 0.62,
+    "locomocion": {
+      "aceleracion": 1.6,
+      "frenado": 2.2,
+      "radioEsquina": 0.35,
+      "suavizadoDireccion": 7
+    },
     "patrulla": [
       {
         "x": 1.2,

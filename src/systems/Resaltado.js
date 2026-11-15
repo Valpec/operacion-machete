@@ -31,7 +31,7 @@ export class Resaltado {
       if (!o.userData.esContorno) return;
       if (encendido) {
         o.userData.materialOriginal ??= o.material;
-        o.material = materialResaltado;
+        o.material = o.userData.materialResaltado ?? materialResaltado;
       } else if (o.userData.materialOriginal) {
         o.material = o.userData.materialOriginal;
       }

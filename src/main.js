@@ -4,6 +4,8 @@ import datosExamen from './data/examen.json';
 import './ui/hud.css';
 import './ui/fase4.css';
 import './ui/menus.css';
+import './ui/intro.css';
+import { Intro } from './intro/Intro.js';
 import { Game } from './core/Game.js';
 import { Input } from './core/Input.js';
 import { CONTROLES } from './core/controles.js';
@@ -12,6 +14,8 @@ import { bus } from './core/EventBus.js';
 import { CamaraPrimeraPersona } from './core/CamaraPrimeraPersona.js';
 import { crearAula } from './world/Aula.js';
 import { crearElenco } from './characters/Elenco.js';
+import { precargarModelos } from './characters/Personaje.js';
+import { rutasModelos } from './characters/config.js';
 import { Navegacion } from './world/Navegacion.js';
 import { ProfesoraIA } from './systems/ProfesoraIA.js';
 import { Debug } from './systems/Debug.js';
@@ -50,8 +54,39 @@ const game = new Game(document.getElementById('app'), balance);
 const input = new Input(game.renderer.domElement);
 game.scene.background = new THREE.Color(0xd9ecff);
 
+// ---------- Pantallas: bienvenida, menú, pausa, opciones y finales ----------
+let audio = null;
+let intro = null;
+const pantallas = new Pantallas({
+  alEmpezar: async () => {
+    audio.iniciar(); // el audio sólo puede arrancar con un gesto del usuario
+    await input.bloquear();
+  },
+  alContinuar: () => input.bloquear(),
+  alVerIntro: async () => {
+    pantallas.ocultarInicio();
+    await verIntro();
+  },
+});
+// Acto I: la cena y el chat del grupo; al terminar (o saltarla) aparece el menú principal
+async function verIntro() {
+  const r = await intro.reproducir();
+  if (r.escondite) estado.escondite = r.escondite;
+  pantallas.mostrarInicio(r.escondite);
+}
+pantallas.crearBienvenida({
+  alEntrar: async (saltarIntro) => {
+    THREE.AudioContext.getContext().resume();
+    pantallas.ocultarBienvenida();
+    if (saltarIntro) pantallas.mostrarInicio();
+    else await verIntro();
+  },
+});
+
 const aula = crearAula(balance);
 game.scene.add(aula.grupo);
+// Los modelos se cargan antes de armar el elenco (se les arma el esqueleto al crearlos)
+await precargarModelos(rutasModelos(), pantallas.bienvenidaProgreso);
 const elenco = crearElenco(aula, game.scene);
 
 // Cámara del jugador anclada al cuello del protagonista
@@ -93,15 +128,7 @@ hud.registrarAcciones(() => {
   ];
 });
 
-// ---------- Pantallas, audio y finales ----------
-let audio = null;
-const pantallas = new Pantallas({
-  alEmpezar: async () => {
-    audio.iniciar(); // el audio sólo puede arrancar con un gesto del usuario
-    await input.bloquear();
-  },
-  alContinuar: () => input.bloquear(),
-});
+// ---------- Audio y finales ----------
 const finales = new Finales({ input, camara, profesora, elenco, aula, examen, papelitos, senias, grupo, hud, panelExamen, pantallas, balance });
 
 // ---------- Orden de actualización ----------
@@ -131,6 +158,7 @@ audio = game.agregar(new AudioManager({ camera: game.camera, profesora, elenco, 
 game.agregar({ update: (dt, t) => elenco.update(dt, t) });
 game.agregar(hud);
 game.agregar(debug);
+intro = game.agregar(new Intro(game));
 
 // ---------- Pausa: al soltar el mouse (Esc) ----------
 estado.pausado = true;
@@ -140,6 +168,7 @@ bus.on('pointerlock', (bloqueado) => {
     if (!estado.iniciado) {
       estado.iniciado = true;
       pantallas.ocultarInicio();
+      document.getElementById('ui').classList.add('jugando'); // recién ahora se ve el HUD
     }
     pantallas.mostrarPausa(false);
     estado.pausado = false;
@@ -155,6 +184,7 @@ window.addEventListener('keydown', (e) => {
 });
 
 game.iniciar();
+pantallas.bienvenidaLista();
 
 // Acceso rápido desde la consola del navegador para depurar
-window.__parcial = { game, aula, elenco, camara, estado, profesora, nav, examen, input, senias, papelitos, machete, hud, panico, postpro, audio, finales, grupo, pantallas };
+window.__parcial = { game, aula, elenco, camara, estado, profesora, nav, examen, input, senias, papelitos, machete, hud, panico, postpro, audio, finales, grupo, pantallas, intro };

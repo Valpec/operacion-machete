@@ -10,7 +10,7 @@ import { estado } from '../core/GameState.js';
  *  - Tensión / pánico: imagen fría, desaturada, borrosa en los bordes y con viñeta.
  *  - Concentración (mirando la hoja): imagen cálida, luminosa y nítida.
  */
-const ShaderEmocion = {
+export const ShaderEmocion = {
   uniforms: {
     tDiffuse: { value: null },
     resolucion: { value: new THREE.Vector2(1, 1) },

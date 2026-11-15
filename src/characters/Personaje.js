@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { toon, contorno, RAMPA, COLOR_CONTORNO } from '../world/materiales.js';
 import { Animador } from './animaciones.js';
+import { autoRig } from './AutoRig.js';
+import { poseSenia } from './Manos.js';
 
 // Medidas base del placeholder (en metros)
 const M = {
@@ -20,6 +22,36 @@ const M = {
 
 const loader = new GLTFLoader();
 
+// Modelos precargados (ruta -> gltf). Se llenan con precargarModelos() antes de armar el elenco,
+// así los personajes se construyen con su esqueleto de una vez y los sistemas que cuelgan cosas
+// de las manos (cartelito, papelito, lapicera) ya encuentran las articulaciones definitivas.
+const cacheModelos = new Map();
+
+export async function precargarModelos(rutas, alProgresar) {
+  let listos = 0;
+  await Promise.all(
+    [...new Set(rutas)].map(
+      (ruta) =>
+        new Promise((resolver) => {
+          loader.load(
+            ruta,
+            (gltf) => {
+              cacheModelos.set(ruta, gltf);
+              alProgresar?.(++listos, rutas.length);
+              resolver();
+            },
+            undefined,
+            (err) => {
+              console.warn(`No se pudo cargar ${ruta}; ese personaje queda como placeholder.`, err);
+              alProgresar?.(++listos, rutas.length);
+              resolver();
+            },
+          );
+        }),
+    ),
+  );
+}
+
 /**
  * Fábrica de personajes.
  *   crearPersonaje({ tipo: 'placeholder', ...config })
@@ -28,11 +60,22 @@ const loader = new GLTFLoader();
  */
 export function crearPersonaje(config, nombre = 'personaje') {
   const p = new Personaje(config, nombre);
+  const gltf = config.modelo && cacheModelos.get(config.modelo.ruta);
+  if (gltf && config.modelo.rig !== false) {
+    // Modelo estático + esqueleto generado por código (ver AutoRig.js)
+    try {
+      p.construirConModelo(config, gltf);
+      return p;
+    } catch (e) {
+      console.warn(`No se pudo armar el esqueleto de ${config.modelo.ruta}; queda el placeholder.`, e);
+      p.raiz.clear();
+      p.rig = {};
+    }
+  }
   if (config.tipo === 'glb') p.cargarGLB(config);
   else p.construirPlaceholder(config);
-  // Modelo estático (sin esqueleto) como "piel": el placeholder queda invisible y sigue
-  // dando las articulaciones que usa la lógica (cabeza para la visión, mano, etc.)
-  if (config.modelo) p.cargarModeloEstatico(config.modelo);
+  // Modelo estático sin esqueleto como "piel" (modo viejo: rig: false)
+  if (config.modelo && config.modelo.rig === false) p.cargarModeloEstatico(config.modelo);
   return p;
 }
 
@@ -151,16 +194,19 @@ export class Personaje {
     contorno(craneo, 0.01);
     cabeza.add(craneo);
 
-    // Ojos y nariz: dejan leer hacia dónde mira (clave para la profesora)
+    // Ojos y nariz: dejan leer hacia dónde mira (clave para la profesora).
+    // sinRostro: los padres de la intro no tienen cara (el chico no puede ni mirarlos)
     const matOjo = new THREE.MeshBasicMaterial({ color: 0x15121a });
-    for (const lado of [-1, 1]) {
+    for (const lado of cfg.sinRostro ? [] : [-1, 1]) {
       const ojo = new THREE.Mesh(new THREE.SphereGeometry(0.016, 8, 6), matOjo);
       ojo.position.set(lado * 0.045, 0.015, -r * 0.93);
       cabeza.add(ojo);
     }
-    const nariz = new THREE.Mesh(new THREE.SphereGeometry(0.022, 8, 6), matPiel);
-    nariz.position.set(0, -0.015, -r * 1.02);
-    cabeza.add(nariz);
+    if (!cfg.sinRostro) {
+      const nariz = new THREE.Mesh(new THREE.SphereGeometry(0.022, 8, 6), matPiel);
+      nariz.position.set(0, -0.015, -r * 1.02);
+      cabeza.add(nariz);
+    }
 
     if (cfg.pelo) this.construirPelo(cabeza, cfg.pelo, r);
     if (cfg.capucha) {
@@ -286,6 +332,85 @@ export class Personaje {
     return { hombro, codo, muneca, mano, dedos, lapicera, brazo, antebrazo };
   }
 
+  // ---------- Modelo con esqueleto automático ----------
+  construirConModelo(cfg, gltf) {
+    const m = cfg.modelo;
+    const sentado = cfg.postura === 'sentado';
+    const { rig, malla, contorno: bordes, articulaciones, manos } = autoRig(this.raiz, gltf.scene, m);
+    this.manos = manos; // dedos articulados (null si no se detectaron: queda la mano postiza)
+    this.rig = rig;
+    this.malla = malla;
+    this.mallaContorno = bordes;
+    this.articulaciones = articulaciones;
+    this.conModelo = true;
+
+    // Mano "postiza" con dedos exagerados para las señas (la mano del modelo se esconde mientras tanto)
+    const matPiel = toon(m.piel ?? cfg.piel ?? 0xeec29c);
+    for (const [lado, signo] of [['brazoI', -1], ['brazoD', 1]]) {
+      const br = rig[lado];
+      if (!manos) this.construirManoPostiza(br, signo, matPiel);
+      if (cfg.lapicera || cfg.soloBrazos || m.lapicera) {
+        const lapicera = new THREE.Mesh(new THREE.CylinderGeometry(0.005, 0.005, 0.12, 6), toon(0x2050c0));
+        lapicera.position.set(0.01 * signo, -0.075, -0.03);
+        lapicera.rotation.x = Math.PI / 2;
+        lapicera.visible = false;
+        br.muneca.add(lapicera);
+        br.lapicera = lapicera;
+      }
+    }
+
+    // Visión, highlight y oclusión usan una caja simple en vez de la malla con piel (mucho más barato)
+    const caja = sentado
+      ? new THREE.Box3(new THREE.Vector3(-0.28, 0.35, -0.45), new THREE.Vector3(0.28, 1.32, 0.25))
+      : new THREE.Box3(new THREE.Vector3(-0.3, 0, -0.22), new THREE.Vector3(0.3, m.altura, 0.22));
+    const inversa = new THREE.Matrix4();
+    const rayoLocal = new THREE.Ray();
+    const punto = new THREE.Vector3();
+    malla.raycast = (raycaster, intersecciones) => {
+      inversa.copy(this.raiz.matrixWorld).invert();
+      rayoLocal.copy(raycaster.ray).applyMatrix4(inversa);
+      if (!rayoLocal.intersectBox(caja, punto)) return;
+      punto.applyMatrix4(this.raiz.matrixWorld);
+      const distancia = raycaster.ray.origin.distanceTo(punto);
+      if (distancia < raycaster.near || distancia > raycaster.far) return;
+      intersecciones.push({ distance: distancia, point: punto.clone(), object: malla });
+    };
+
+    // Postura: sentado = cadera a la altura del asiento, muslos adelante y piernas abajo
+    if (sentado) {
+      rig.cadera.position.y = m.alturaCadera ?? 0.52;
+      rig.cadera.position.z += m.offsetCaderaZ ?? 0.04;
+      for (const [lado, signo] of [['I', -1], ['D', 1]]) {
+        rig['pierna' + lado].rotation.set(Math.PI / 2 - 0.05, 0, -signo * 0.06);
+        rig['rodilla' + lado].rotation.set(-Math.PI / 2 + 0.12, 0, signo * 0.04);
+        rig['tobillo' + lado].rotation.set(-0.05, 0, 0);
+      }
+    }
+    if (cfg.escala) this.raiz.scale.setScalar(cfg.escala);
+    // Primera persona: la cabeza no se dibuja (la cámara está ahí)
+    if (cfg.soloBrazos) rig.cabeza.scale.setScalar(0.001);
+    this.animador.poseInicial(sentado ? (cfg.soloBrazos ? 'manosEnBanco' : 'sentado') : 'parado');
+  }
+
+  // Mano "postiza" con dedos exagerados: sólo si no se pudieron detectar los dedos del modelo
+  construirManoPostiza(br, signo, matPiel) {
+    const mano = new THREE.Mesh(new THREE.SphereGeometry(0.05, 12, 10), matPiel);
+    mano.scale.set(0.9, 1.15, 0.65);
+    mano.position.y = -0.045;
+    mano.visible = false;
+    contorno(mano, 0.006);
+    br.muneca.add(mano);
+    br.mano = mano;
+    for (let i = 0; i < 4; i++) {
+      const dedo = new THREE.Mesh(new THREE.CapsuleGeometry(0.012, 0.065, 3, 6), matPiel);
+      dedo.position.set((i - 1.5) * 0.022 * -signo, -0.115, 0);
+      dedo.visible = false;
+      contorno(dedo, 0.005);
+      br.muneca.add(dedo);
+      br.dedos.push(dedo);
+    }
+  }
+
   // ---------- Modelo GLB ----------
   cargarGLB(cfg) {
     loader.load(
@@ -387,6 +512,11 @@ export class Personaje {
     return this.manoModelo ?? this.rig.brazoD?.muneca ?? this.raiz;
   }
 
+  // Cuánto mide de alto el personaje (para encuadres y la mirada de la profe)
+  get altura() {
+    return (this.config.modelo?.altura ?? 1.5) * (this.config.escala ?? 1);
+  }
+
   // Animación procedural del modelo estático: balanceo al caminar e inclinación según la pose
   animarModeloEstatico(dt, t) {
     const pv = this.pivoteModelo;
@@ -401,8 +531,20 @@ export class Personaje {
 
   // ---------- Interfaz común ----------
   mostrarDedos(cantidad, lado = 'brazoD') {
-    const dedos = this.rig[lado]?.dedos ?? [];
+    // Con dedos articulados: se estiran los primeros n y el resto queda en puño
+    if (this.manos) {
+      this.manos.forzar(lado === 'brazoI' ? 'I' : 'D', cantidad > 0 ? poseSenia(cantidad) : null);
+      return;
+    }
+    const br = this.rig[lado];
+    const dedos = br?.dedos ?? [];
     dedos.forEach((d, i) => (d.visible = i < cantidad));
+    // Mano rígida: se cambia la mano del modelo por la mano de señas
+    if (br?.manoModelo && br.mano) {
+      const senia = cantidad > 0;
+      br.manoModelo.scale.setScalar(senia ? 0.3 : 1);
+      br.mano.visible = senia;
+    }
   }
 
   mostrarLapicera(visible, lado = 'brazoD') {
@@ -419,6 +561,7 @@ export class Personaje {
   update(dt, t) {
     this.mixer?.update(dt);
     this.animador.update(dt, t);
+    this.manos?.update(dt);
     if (this.pivoteModelo) this.animarModeloEstatico(dt, t);
   }
 }

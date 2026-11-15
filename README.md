@@ -1,4 +1,4 @@
-# El Parcial — prototipo jugable (three.js)
+# Operación Machete — prototipo jugable (three.js)
 
 Simulación para **Creatividad y Desarrollo de Entornos Virtuales** (UTN FRC).
 
@@ -19,6 +19,24 @@ Se abre el navegador en `http://localhost:5173`. Para una versión estática: `n
 y `npm run preview` para probarla.
 
 > Recomendado: auriculares. Los pasos de la profesora se escuchan en estéreo (además hay indicadores visuales y subtítulos).
+
+## Flujo del juego
+
+1. **Bienvenida:** "Hacé clic para empezar" (el navegador necesita ese clic para habilitar el audio).
+   También se puede saltar la intro e ir directo al menú.
+2. **Intro — Acto I (≈1 minuto, se salta con Esc):** la noche anterior al parcial. El chico cena en el comedor con
+   la mesa tapada de apuntes; sus padres caminan alrededor retándolo. **Nunca se les ve la cara**: quedan fuera de
+   cuadro o desenfocados (profundidad de campo), como si él no pudiera levantar la vista. Sus voces son "habla"
+   sintetizada que no se entiende (un hombre y una mujer); lo que dicen está en los subtítulos. La presión sube con
+   el latido, el tic-tac del reloj, la imagen que se enfría y desenfoca y frases que rebotan en pantalla, hasta un
+   corte a silencio. Vibra el celular: sus amigos lo agregaron al grupo **"Operación Machete"**.
+3. **Chat del grupo:** los mensajes llegan solos (clic o Espacio para apurar). El jugador elige respuestas: puede
+   dudar, pero el grupo lo presiona hasta que acepta. Al final elige **dónde esconder el machete** (queda
+   preseleccionado en el menú).
+4. **Menú principal:** cómo se juega, controles, escondite, opciones y "Ver la intro de nuevo".
+5. **El aula** (Actos II a IV). "Jugar de nuevo" y "Reiniciar" vuelven directo al menú, sin repetir la intro.
+
+Atajo para pruebas: `?intro=0` en la URL va directo al menú.
 
 ## Controles
 
@@ -62,16 +80,19 @@ Todas las teclas se cambian en [`src/core/controles.js`](src/core/controles.js).
 
 ```
 src/
-  main.js            arma todo y define el orden de actualización
+  main.js            arma todo y define el orden de actualización (bienvenida → intro → menú → aula)
+  intro/             Acto I: comedor, padres sin rostro, voces sintetizadas, chat del grupo
   core/              loop (Game), input, controles, estado global, bus de eventos, cámara en primera persona
   world/             aula, mobiliario, iluminación, materiales toon + contornos, grafo de pasillos
-  characters/        config.js (apariencia), fábrica de personajes (placeholder o GLB), poses y animaciones
+  characters/        config.js (apariencia), fábrica de personajes, auto-rig de modelos, poses y animaciones
   systems/           profesora IA, pánico, machete, señas, papelitos, examen, modo hoja, grupo, finales, debug
   fx/                postprocesado (desenfoque, viñeta, color grading)
   audio/             síntesis procedural y AudioManager (posicional, buses, ducking)
   ui/                HUD, panel del examen, pantallas (inicio, pausa, opciones, finales) y estilos
   data/              examen.json (preguntas) y balance.json (todos los números del juego)
 public/audio/        audio opcional para reemplazar los sonidos procedurales
+public/modelos/      modelos 3D optimizados (profesora, protagonista, Sofi, Tomi)
+herramientas/        script para optimizar modelos GLB
 ```
 
 ## Cómo modificarlo
@@ -82,8 +103,32 @@ public/audio/        audio opcional para reemplazar los sonidos procedurales
   `correcta` (índice desde 0), `claves` (texto exacto del enunciado que brilla) y `recuerdo`. La sección `machete`
   define qué respuestas tiene el machete, cuáles pide el grupo y cuáles pasa Sofi.
 - **Personajes:** toda la apariencia está en [`src/characters/config.js`](src/characters/config.js).
-  Para usar un modelo, cambiá la entrada por `{ tipo: 'glb', ruta: '/modelos/x.glb', escala, huesos: {...} }`
-  (los modelos van en `public/modelos/`); la lógica no cambia.
+  La profesora, el protagonista, Sofi y Tomi usan modelos 3D (`public/modelos/`). Los **padres** (intro,
+  `Comedor.js`) reutilizan los modelos de Tomi (papá) y Sofi (mamá) con otra remera y otro pelo. Los **alumnos
+  de fondo** reutilizan los modelos de Tomi, Sofi y el protagonista, sólo de la cintura para arriba
+  (`soloTorso`), con remera azul marino y el pelo en distintos colores (`configRelleno`). Juli y Martín siguen
+  como placeholders hechos con primitivas.
+- **Recolorear un modelo:** en `modelo` se puede poner `remera: 0xRRGGBB` y/o `pelo: 0xRRGGBB`;
+  [`Recolor.js`](src/characters/Recolor.js) clasifica los vértices (pelo / remera) por altura y color de textura
+  y un shader cambia el color conservando el detalle. `soloTorso: true` descarta las piernas.
+- **Manos:** [`Manos.js`](src/characters/Manos.js) detecta los dedos en la malla y arma por mano un pulgar y
+  cuatro dedos de tres falanges. Poses de mano en `POSES_MANO` (reposo, puño, plana, señalar, lapicera, pinza…);
+  `MANOS_POR_POSE` en `animaciones.js` asigna una a cada pose de brazo, y las señas de Sofi usan los dedos reales.
+- **Modelos 3D con esqueleto automático:** los GLB son mallas estáticas en pose A (sin huesos). Al cargarlos,
+  [`AutoRig.js`](src/characters/AutoRig.js) detecta las articulaciones cortando el cuerpo en rebanadas, arma un
+  esqueleto con **los mismos nombres que el placeholder** (cadera, torso, cuello, cabeza, hombro/codo/muñeca,
+  pierna/rodilla/tobillo) y calcula los pesos de piel. Por eso el `Animador` y todos los sistemas funcionan igual:
+  caminan, se sientan, hacen señas y lanzan papelitos. Para sumar un modelo nuevo, agregá
+  `modelo: { ruta, altura, rotacionY: Math.PI }` a la entrada del personaje.
+- **Optimizar modelos:** los originales pesaban ~17 MB cada uno (360 mil triángulos y texturas de 4K).
+  [`herramientas/optimizar-modelos.mjs`](herramientas/optimizar-modelos.mjs) los reduce a ~1 MB (≈30 mil
+  triángulos, textura de color de 1024 px; el juego usa materiales toon, así que normal y rugosidad sobran).
+  Uso: `npm i -D @gltf-transform/core @gltf-transform/functions meshoptimizer sharp` y
+  `node herramientas/optimizar-modelos.mjs carpeta-originales public/modelos`. Los originales siguen en el historial de git.
+- **Intro:** guion, planos de cámara y diálogos en [`src/intro/Intro.js`](src/intro/Intro.js); el comedor en
+  [`Comedor.js`](src/intro/Comedor.js); los mensajes del grupo en [`ChatGrupo.js`](src/intro/ChatGrupo.js).
+- **Profesora:** la locomoción (aceleración, frenado, radio de las esquinas) se ajusta en `balance.json` →
+  `profesora.locomocion` (opcional; si no está, usa valores por defecto) y el largo del paso con `zancada` en `config.js`.
 - **Audio:** todo se genera por código. Para reemplazar un sonido por un archivo, ver
   [`public/audio/LEEME.txt`](public/audio/LEEME.txt).
 - **Consola:** `window.__parcial` expone los sistemas para depurar, por ejemplo

@@ -8,23 +8,29 @@
 //  - cabeza x negativo: mira hacia abajo; cabeza y positivo: gira a su izquierda
 //  - torso x negativo: se inclina hacia adelante
 
-const ARTICULACIONES = ['torso', 'cabeza', 'hombroI', 'codoI', 'munecaI', 'hombroD', 'codoD', 'munecaD', 'piernaI', 'piernaD'];
+//  - pierna x positivo: el muslo va hacia adelante; rodilla x negativo: dobla la rodilla
+//  (cadera, rodillas y tobillos sólo existen en los personajes con modelo y esqueleto)
+const ARTICULACIONES = [
+  'cadera', 'torso', 'cabeza', 'hombroI', 'codoI', 'munecaI', 'hombroD', 'codoD', 'munecaD',
+  'piernaI', 'piernaD', 'rodillaI', 'rodillaD', 'tobilloI', 'tobilloD',
+];
 
 export const POSES = {
   sentado: {
     torso: [-0.08, 0, 0], cabeza: [-0.25, 0, 0],
-    hombroI: [0.6, 0, 0.18], codoI: [0.85, 0, 0],
-    hombroD: [0.6, 0, -0.18], codoD: [0.85, 0, 0],
+    hombroI: [0.6, 0, 0.18], codoI: [0.85, 0, 0], munecaI: [0, -1.3, 0],
+    hombroD: [0.6, 0, -0.18], codoD: [0.85, 0, 0], munecaD: [0, 1.3, 0],
   },
   escribir: {
     torso: [-0.18, 0, 0], cabeza: [-0.55, 0, 0],
-    hombroI: [0.55, 0, 0.3], codoI: [0.95, 0, 0],
-    hombroD: [0.62, 0, -0.12], codoD: [0.85, 0, 0], munecaD: [0.3, 0, 0],
+    hombroI: [0.55, 0, 0.3], codoI: [0.95, 0, 0], munecaI: [0, -1.4, 0],
+    hombroD: [0.62, 0, -0.12], codoD: [0.85, 0, 0], munecaD: [0.3, 1.2, 0],
   },
   // Primera persona: manos apoyadas sobre la hoja
+  // (munecas y = ±π/2: la palma mira hacia abajo, apoyada; no cambia nada en el placeholder)
   manosEnBanco: {
-    hombroI: [0.55, 0, 0.12], codoI: [0.95, 0, 0],
-    hombroD: [0.55, 0, -0.12], codoD: [0.95, 0, 0],
+    hombroI: [0.55, 0, 0.12], codoI: [0.95, 0, 0], munecaI: [0, -1.45, 0],
+    hombroD: [0.55, 0, -0.12], codoD: [0.95, 0, 0], munecaD: [0, 1.45, 0],
   },
   parado: {
     hombroI: [0.05, 0, -0.08], codoI: [0.15, 0, 0],
@@ -42,10 +48,11 @@ export const POSES = {
     hombroI: [0.05, 0, -0.08], codoI: [0.2, 0, 0],
     hombroD: [1.15, 0, -0.1], codoD: [0.35, 0, 0],
   },
+  // Manos atrás: el brazo rota hacia adentro (y) para que el codo doble hacia la espalda
   manosAtras: {
     torso: [0.03, 0, 0],
-    hombroI: [-0.35, 0, 0.25], codoI: [0.9, 0, 0],
-    hombroD: [-0.35, 0, -0.25], codoD: [0.9, 0, 0],
+    hombroI: [-0.5, -1.4, 0.1], codoI: [1.55, 0, 0],
+    hombroD: [-0.5, 1.4, -0.1], codoD: [1.55, 0, 0],
   },
   // Señas: mano derecha levantada mostrando dedos
   levantarMano: {
@@ -101,8 +108,8 @@ export const POSES = {
   },
   // ---- Protagonista (primera persona: sólo se ven antebrazos y manos) ----
   jugMachete: {
-    hombroI: [0.85, 0, 0.2], codoI: [1.05, 0, 0],
-    hombroD: [0.55, 0, -0.12], codoD: [0.95, 0, 0],
+    hombroI: [0.85, 0, 0.2], codoI: [1.05, 0, 0], munecaI: [0, -0.9, 0],
+    hombroD: [0.55, 0, -0.12], codoD: [0.95, 0, 0], munecaD: [0, 1.45, 0],
   },
   jugApuntar: {
     hombroI: [0.55, 0, 0.12], codoI: [0.95, 0, 0],
@@ -113,12 +120,42 @@ export const POSES = {
     hombroD: [1.55, 0, -0.1], codoD: [0.15, 0, 0],
   },
   jugDedos: {
-    hombroI: [0.55, 0, 0.12], codoI: [0.95, 0, 0],
-    hombroD: [2.2, 0, -0.55], codoD: [0.7, 0, 0],
+    hombroI: [0.55, 0, 0.12], codoI: [0.95, 0, 0], munecaI: [0, -1.45, 0],
+    hombroD: [1.85, 0, 0.02], codoD: [0.45, 0, 0],
   },
   jugAbrirPapel: {
-    hombroI: [0.35, 0, 0.35], codoI: [1.05, 0, 0],
-    hombroD: [0.35, 0, -0.35], codoD: [1.05, 0, 0],
+    hombroI: [0.35, 0, 0.35], codoI: [1.05, 0, 0], munecaI: [0, -0.6, 0],
+    hombroD: [0.35, 0, -0.35], codoD: [1.05, 0, 0], munecaD: [0, 0.6, 0],
+  },
+  // ---- Intro: la cena ----
+  // El chico revuelve la comida sin comer, encorvado y con la cabeza gacha
+  // (el torso inclinado lleva los brazos hacia atrás: por eso los hombros van bien adelante)
+  cenar: {
+    torso: [-0.3, 0, 0], cabeza: [-0.45, 0, 0],
+    hombroI: [1.3, 0, 0.16], codoI: [0.62, 0, 0], munecaI: [0, -1.4, 0],
+    hombroD: [1.35, 0, -0.04], codoD: [0.55, 0, 0], munecaD: [-0.1, 0.9, 0],
+  },
+  // Codo izquierdo en la mesa y la frente apoyada en la mano
+  agobiado: {
+    torso: [-0.38, 0, 0], cabeza: [-0.6, 0.15, 0.12],
+    hombroI: [1.4, 0, 0.3], codoI: [2.4, 0, 0], munecaI: [0.2, -0.5, 0],
+    hombroD: [1.42, 0, -0.04], codoD: [0.5, 0, 0], munecaD: [-0.1, 0.9, 0],
+  },
+  // Padres: señalar con el dedo, apoyar las manos en la mesa
+  senalar: {
+    torso: [-0.06, 0, 0],
+    hombroI: [0.1, 0, -0.1], codoI: [0.3, 0, 0],
+    hombroD: [1.45, 0, 0.05], codoD: [0.15, 0, 0],
+  },
+  apoyarMesa: {
+    torso: [-0.5, 0, 0], cabeza: [-0.2, 0, 0],
+    hombroI: [0.75, 0, -0.15], codoI: [0.35, 0, 0],
+    hombroD: [0.75, 0, 0.15], codoD: [0.35, 0, 0],
+  },
+  brazosEnJarra: {
+    torso: [0.04, 0, 0],
+    hombroI: [0.1, 0, -0.65], codoI: [1.6, 0, 0],
+    hombroD: [0.1, 0, 0.65], codoD: [1.6, 0, 0],
   },
   // Disimular: todos bajan las manos y miran la hoja
   disimular: {
@@ -126,6 +163,34 @@ export const POSES = {
     hombroI: [0.55, 0, 0.3], codoI: [0.95, 0, 0],
     hombroD: [0.6, 0, -0.15], codoD: [0.85, 0, 0],
   },
+};
+
+// Pose de los dedos que acompaña a cada pose del brazo (por defecto: relajada).
+// Valores en POSES_MANO (Manos.js). [izquierda, derecha]
+const MANOS_POR_POSE = {
+  escribir: ['plana', 'lapicera'],
+  golpear: ['plana', 'lapicera'],
+  disimular: ['plana', 'lapicera'],
+  manosEnBanco: ['plana', 'plana'],
+  jugMachete: ['pinza', 'plana'],
+  jugApuntar: ['plana', 'pinza'],
+  jugLanzar: ['plana', 'abierta'],
+  jugDedos: ['plana', 'abierta'],
+  jugAbrirPapel: ['pinza', 'pinza'],
+  prepararLanzar: ['plana', 'pinza'],
+  lanzar: ['plana', 'abierta'],
+  atrapar: ['atrapar', 'atrapar'],
+  reclamo: ['abierta', 'abierta'],
+  bronca: ['puno', 'puno'],
+  brazosEnJarra: ['puno', 'puno'],
+  senalar: ['reposo', 'senalar'],
+  apoyarMesa: ['plana', 'plana'],
+  retirarExamen: ['reposo', 'pinza'],
+  seniaCartel: ['pinza', 'reposo'],
+  seniaPedido: ['pinza', 'abierta'],
+  cenar: ['plana', 'pinza'],
+  agobiado: ['puno', 'pinza'],
+  escribirPizarron: ['reposo', 'lapicera'],
 };
 
 // Capas procedurales: devuelven offsets que se suman a la pose
@@ -141,12 +206,36 @@ const CAPAS = {
     const fase = (t * 3.2) % 1;
     return { codoD: [-Math.max(0, Math.sin(fase * Math.PI)) * 0.45, 0, 0] };
   },
-  caminar: (t, f, vel = 1) => {
-    const s = Math.sin(t * 7 * vel + f);
+  // Ciclo de marcha. La fase la avanza quien mueve al personaje según la DISTANCIA recorrida
+  // (an.faseCaminar), así los pies no patinan aunque cambie la velocidad.
+  caminar: (t, f, vel = 1, an) => {
+    const fase = an?.faseCaminar ?? t * 7 * vel + f;
+    const s = Math.sin(fase);
+    const c = Math.cos(fase);
+    const A = an?.zancada ?? 0.3;                 // amplitud del muslo (radianes)
+    const k = A / 0.3;
+    // La rodilla se dobla mientras la pierna avanza (balanceo) y queda casi recta al apoyar
+    const rodI = -(0.06 + 0.8 * Math.pow(Math.max(0, c), 1.5)) * k;
+    const rodD = -(0.06 + 0.8 * Math.pow(Math.max(0, -c), 1.5)) * k;
+    const bb = an?.balanceoBrazos ?? 1;          // los brazos acompañan (0 = manos atrás)
     return {
-      piernaI: [s * 0.35, 0, 0],
-      piernaD: [-s * 0.35, 0, 0],
-      torso: [0, s * 0.04, 0],
+      piernaI: [s * A, 0, 0],
+      piernaD: [-s * A, 0, 0],
+      rodillaI: [rodI, 0, 0],
+      rodillaD: [rodD, 0, 0],
+      // El pie se mantiene casi paralelo al piso
+      tobilloI: [-(s * A + rodI) * 0.55, 0, 0],
+      tobilloD: [-(-s * A + rodD) * 0.55, 0, 0],
+      // La pelvis gira con la pierna que avanza y el torso compensa
+      cadera: [0, s * 0.08 * k, Math.sin(fase * 2) * 0.015],
+      torso: [0.03 * k, -s * 0.13 * k, -Math.sin(fase * 2) * 0.015],
+      hombroI: [-s * 0.32 * bb * k, 0, 0],
+      hombroD: [s * 0.32 * bb * k, 0, 0],
+      codoI: [(0.12 + Math.max(0, -s) * 0.25) * bb, 0, 0],
+      codoD: [(0.12 + Math.max(0, s) * 0.25) * bb, 0, 0],
+      cabeza: [0, s * 0.05 * k, 0],
+      // Sube y baja: más alto con la pierna vertical, más bajo con las piernas abiertas
+      caderaY: [(Math.cos(fase * 2) * 0.018 - 0.012) * k, 0, 0],
     };
   },
   reclamo: (t, f) => ({
@@ -156,6 +245,18 @@ const CAPAS = {
   }),
   bronca: (t, f) => ({ cabeza: [0, Math.sin(t * 2 + f) * 0.2, 0] }),
   asentir: (t) => ({ cabeza: [Math.sin(t * 9) * 0.18, 0, 0] }),
+  // Revolver la comida con el tenedor, sin ganas
+  revolver: (t, f) => ({
+    hombroD: [Math.sin(t * 1.3 + f) * 0.05, 0, Math.sin(t * 0.9 + f) * 0.07],
+    codoD: [Math.sin(t * 1.3 + f + 1) * 0.07, 0, 0],
+  }),
+  // Retar: gestos enfáticos con las manos y la cabeza
+  retar: (t, f) => ({
+    hombroD: [Math.max(0, Math.sin(t * 4.2 + f)) * 0.35, 0, 0],
+    codoD: [Math.max(0, Math.sin(t * 4.2 + f)) * 0.3, 0, 0],
+    cabeza: [Math.sin(t * 5 + f) * 0.06, Math.sin(t * 2.1 + f) * 0.12, 0],
+    torso: [Math.sin(t * 4.2 + f) * 0.03, 0, 0],
+  }),
 };
 
 export class Animador {
@@ -165,7 +266,8 @@ export class Animador {
     this.objetivo = {};
     this.extra = {};   // offsets externos (p. ej., girar la cabeza hacia algo)
     this.base = {};
-    this.capas = new Map([['respirar', 1]]);
+    this.capas = new Map([['respirar', 1]]);   // peso objetivo de cada capa
+    this.pesos = new Map([['respirar', 1]]);   // peso actual (se acerca suave al objetivo)
     this.velocidad = 6;
     this.fase = Math.random() * 10;
     this.velCaminar = 1;
@@ -189,6 +291,7 @@ export class Animador {
       const a = this.articulacion(n);
       if (a) this.base[n] = [a.rotation.x, a.rotation.y, a.rotation.z];
     }
+    if (this.p.rig.cadera) this.baseCaderaY = this.p.rig.cadera.position.y;
   }
 
   poseInicial(nombre) {
@@ -203,19 +306,32 @@ export class Animador {
     this.poseActual = nombre;
     this.velocidad = velocidad;
     for (const n of ARTICULACIONES) this.objetivo[n] = def[n] ?? [0, 0, 0];
+    const manos = MANOS_POR_POSE[nombre] ?? ['reposo', 'reposo'];
+    this.p.manos?.pose('I', manos[0]);
+    this.p.manos?.pose('D', manos[1]);
   }
 
+  // Las capas entran y salen con una mezcla suave (sin saltos al empezar o dejar de caminar)
   capa(nombre, peso = 1) {
-    if (peso <= 0) this.capas.delete(nombre);
-    else this.capas.set(nombre, peso);
+    this.capas.set(nombre, Math.max(0, peso));
+    if (!this.pesos.has(nombre)) this.pesos.set(nombre, 0);
   }
 
   update(dt, t) {
     const k = 1 - Math.exp(-this.velocidad * dt);
+    const kCapa = 1 - Math.exp(-(this.velocidadCapas ?? 7) * dt);
     // offsets de capas
     const suma = {};
-    for (const [nombre, peso] of this.capas) {
-      const off = CAPAS[nombre]?.(t, this.fase, this.velCaminar);
+    for (const [nombre, actual] of this.pesos) {
+      const objetivo = this.capas.get(nombre) ?? 0;
+      const peso = actual + (objetivo - actual) * kCapa;
+      if (objetivo === 0 && peso < 0.002) {
+        this.pesos.delete(nombre);
+        this.capas.delete(nombre);
+        continue;
+      }
+      this.pesos.set(nombre, peso);
+      const off = CAPAS[nombre]?.(t, this.fase, this.velCaminar, this);
       if (!off) continue;
       for (const [art, v] of Object.entries(off)) {
         suma[art] ??= [0, 0, 0];
@@ -232,6 +348,10 @@ export class Animador {
       const b = this.base[n] ?? [0, 0, 0];
       const s = suma[n];
       a.rotation.set(b[0] + cur[0] + (s ? s[0] : 0), b[1] + cur[1] + (s ? s[1] : 0), b[2] + cur[2] + (s ? s[2] : 0));
+    }
+    // Rebote vertical de la cadera al caminar
+    if (this.baseCaderaY !== undefined && this.p.rig.cadera) {
+      this.p.rig.cadera.position.y = this.baseCaderaY + (suma.caderaY ? suma.caderaY[0] : 0);
     }
   }
 }

@@ -45,7 +45,9 @@ export class ProfesoraIA {
     this.indicePatrulla = 0;
     this.tiempoSospecha = 0;
     this.focoSospecha = new THREE.Vector3();
-    this.distPaso = 0;
+    this.velActual = 0;          // velocidad real (acelera y frena hacia this.velocidad)
+    this.dirMov = new THREE.Vector3();
+    personaje.animador.faseCaminar = 0;
     this.relojVision = 0;
     this.veAlJugador = false;
     this.veTrampa = false;
@@ -99,43 +101,83 @@ export class ProfesoraIA {
     this.alTerminarEspera = despues;
   }
 
+  // Locomoción: acelera y frena con suavidad, redondea las esquinas del recorrido y avanza
+  // el ciclo de marcha según la distancia recorrida (los pies no patinan).
   moverse(dt) {
-    if (!this.ruta.length) {
-      this.p.animador.capa('caminar', 0);
-      return;
-    }
-    const objetivo = this.ruta[0];
-    const d = this._v.subVectors(objetivo, this.posicion).setY(0);
-    const dist = d.length();
-    const paso = this.velocidad * dt;
-    if (dist <= paso) {
-      this.posicion.copy(objetivo);
-      this.ruta.shift();
-      if (!this.ruta.length) {
+    const an = this.p.animador;
+    const loc = this.b.locomocion ?? {};
+    const acel = loc.aceleracion ?? 1.6;
+    const frenado = loc.frenado ?? 2.2;
+    let velObjetivo = 0;
+    let dir = null;
+    if (this.ruta.length) {
+      // Esquinas: el punto intermedio se da por alcanzado un poco antes (traza una curva)
+      const radioEsquina = loc.radioEsquina ?? 0.35;
+      while (this.ruta.length > 1 && this._v.subVectors(this.ruta[0], this.posicion).setY(0).length() < radioEsquina) {
+        this.ruta.shift();
+      }
+      const objetivo = this.ruta[0];
+      const d = this._v.subVectors(objetivo, this.posicion).setY(0);
+      const dist = d.length();
+      let restante = dist;
+      for (let i = 1; i < this.ruta.length; i++) restante += this.ruta[i].distanceTo(this.ruta[i - 1]);
+      // Frena para llegar justo (v² = 2·a·d) y afloja si tiene que girar mucho
+      velObjetivo = Math.min(this.velocidad, Math.sqrt(2 * frenado * restante) + 0.04);
+      if (dist > 1e-4) {
+        dir = d.divideScalar(dist);
+        const error = Math.abs(difAngulo(this.orientacion, angulo(dir.x, dir.z)));
+        velObjetivo *= THREE.MathUtils.clamp(1.25 - error / 1.4, 0.2, 1);
+      }
+      if (this.ruta.length === 1 && dist < Math.max(0.02, this.velActual * dt * 1.2)) {
+        // Llegó
+        this.posicion.x = objetivo.x;
+        this.posicion.z = objetivo.z;
+        this.ruta.shift();
+        dir = null;
+        velObjetivo = 0;
+        this.velActual = Math.min(this.velActual, 0.15);
         const cb = this.alLlegar;
         this.alLlegar = null;
-        this.p.animador.capa('caminar', 0);
         cb?.();
       }
-    } else {
-      d.multiplyScalar(paso / dist);
-      this.posicion.add(d);
-      this.orientacion = this.girarHacia(this.orientacion, angulo(d.x, d.z), dt);
     }
-    // Pasos: evento con posición para el audio posicional y los indicadores del HUD
-    this.distPaso += Math.min(paso, dist);
-    if (this.distPaso >= this.b.distanciaPaso) {
-      this.distPaso = 0;
+    const dv = velObjetivo - this.velActual;
+    this.velActual += THREE.MathUtils.clamp(dv, -frenado * 1.6 * dt, acel * dt);
+    if (!this.ruta.length && velObjetivo === 0) this.velActual = Math.max(0, this.velActual - frenado * 2 * dt);
+
+    // La dirección de avance también gira suave (nada de cambios bruscos en las esquinas)
+    if (dir) {
+      const k = 1 - Math.exp(-(loc.suavizadoDireccion ?? 7) * dt);
+      if (this.dirMov.lengthSq() < 0.5) this.dirMov.copy(dir);
+      else this.dirMov.lerp(dir, k).normalize();
+    }
+    const paso = this.ruta.length ? this.velActual * dt : 0;
+    if (paso > 0) {
+      this.posicion.addScaledVector(this.dirMov, paso);
+      this.orientacion = this.girarHacia(this.orientacion, angulo(this.dirMov.x, this.dirMov.z), dt);
+    }
+
+    // Ciclo de marcha: medio ciclo (π) por paso; el largo del paso crece con la velocidad
+    const largoPaso = 0.26 + 0.34 * this.velActual;
+    const faseAntes = an.faseCaminar;
+    an.faseCaminar += (paso / largoPaso) * Math.PI;
+    const relVel = this.velActual / this.b.velocidadPatrulla;
+    an.capa('caminar', THREE.MathUtils.clamp(this.velActual / 0.35, 0, 1));
+    an.zancada = (this.p.config.zancada ?? 0.3) * THREE.MathUtils.clamp(0.55 + 0.45 * relVel, 0.45, 1.2);
+    an.balanceoBrazos = { manosAtras: 0.06, escribirPizarron: 0, retirarExamen: 0 }[an.poseActual] ?? 0.9;
+
+    // Pasos: suenan cuando apoya el talón (fase π/2 + k·π), con posición para el audio y el HUD
+    if (Math.floor((an.faseCaminar - Math.PI / 2) / Math.PI) > Math.floor((faseAntes - Math.PI / 2) / Math.PI)) {
       bus.emit('paso', { posicion: this.posicion.clone(), fuerte: this.estado !== 'patrulla' });
     }
-    this.p.animador.capa('caminar', 1);
-    this.p.animador.velCaminar = this.velocidad / this.b.velocidadPatrulla;
   }
 
   girarHacia(actual, objetivo, dt) {
+    // Giro amortiguado (arranca y termina suave) con un tope de velocidad
     const diff = difAngulo(actual, objetivo);
     const max = this.b.velocidadGiro * dt;
-    return actual + THREE.MathUtils.clamp(diff, -max, max);
+    const suave = diff * (1 - Math.exp(-9 * dt));
+    return actual + THREE.MathUtils.clamp(suave, -max, max);
   }
 
   // ---------- Estados ----------
