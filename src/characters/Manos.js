@@ -300,7 +300,7 @@ export const POSES_MANO = {
 export function poseSenia(n) {
   const base = {};
   const abiertos = ['indice', 'medio', 'anular', 'menique'];
-  const separacion = { indice: -0.05, medio: 0.0, anular: 0.06, menique: 0.14 };
+  const separacion = { indice: -0.1, medio: -0.01, anular: 0.09, menique: 0.21 }; // bien abiertos para contar
   for (const [nombre, def] of Object.entries(POSES_MANO.puno)) base[nombre] = def;
   abiertos.forEach((nombre, i) => {
     if (i < n) base[nombre] = { f: [0.02, 0.02, 0.02], abrir: separacion[nombre] };

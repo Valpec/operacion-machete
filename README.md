@@ -105,12 +105,13 @@ herramientas/        script para optimizar modelos GLB
 - **Personajes:** toda la apariencia está en [`src/characters/config.js`](src/characters/config.js).
   La profesora, el protagonista, Sofi y Tomi usan modelos 3D (`public/modelos/`). Los **padres** (intro,
   `Comedor.js`) reutilizan los modelos de Tomi (papá) y Sofi (mamá) con otra remera y otro pelo. Los **alumnos
-  de fondo** reutilizan los modelos de Tomi, Sofi y el protagonista, sólo de la cintura para arriba
-  (`soloTorso`), con remera azul marino y el pelo en distintos colores (`configRelleno`). Juli y Martín siguen
+  de fondo** reutilizan los modelos de Tomi, Sofi y el protagonista (cuerpo completo, sentados), con remera azul marino y el pelo en distintos colores (`configRelleno`). Juli y Martín siguen
   como placeholders hechos con primitivas.
 - **Recolorear un modelo:** en `modelo` se puede poner `remera: 0xRRGGBB` y/o `pelo: 0xRRGGBB`;
   [`Recolor.js`](src/characters/Recolor.js) clasifica los vértices (pelo / remera) por altura y color de textura
-  y un shader cambia el color conservando el detalle. `soloTorso: true` descarta las piernas.
+  y un shader cambia el color conservando el detalle. `soloTorso: true` (opcional, hoy sin uso) descarta las piernas.
+- **Sofi (señas):** el cartel (x2.5) flota sobre su mano izquierda siempre de frente al jugador y la mano de señas se agranda (x2.6) con la palma hacia él (`Senias.js`, `escalarMano` / `orientarPalma`).
+- **Alumnos de fondo:** `modelo.elevarTorso` sube el tronco y la pose `escribirFondo` apoya las manos sobre la tapa.
 - **Manos:** [`Manos.js`](src/characters/Manos.js) detecta los dedos en la malla y arma por mano un pulgar y
   cuatro dedos de tres falanges. Poses de mano en `POSES_MANO` (reposo, puño, plana, señalar, lapicera, pinza…);
   `MANOS_POR_POSE` en `animaciones.js` asigna una a cada pose de brazo, y las señas de Sofi usan los dedos reales.

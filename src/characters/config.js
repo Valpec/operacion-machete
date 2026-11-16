@@ -128,7 +128,7 @@ export function configRelleno(rnd) {
     piel: elegir(PIELES),
     pelo: { estilo: elegir(ESTILOS_RELLENO), color: pelo },
     anteojos: rnd() < 0.2,
-    modelo: { ...elegir(MODELOS_RELLENO), rotacionY: Math.PI, remera: AZUL_MARINO, pelo },
+    modelo: { ...elegir(MODELOS_RELLENO), rotacionY: Math.PI, elevarTorso: 0.12, remera: AZUL_MARINO, pelo },
   };
 }
 

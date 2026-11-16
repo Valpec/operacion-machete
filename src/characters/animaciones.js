@@ -60,6 +60,13 @@ export const POSES = {
     hombroI: [0.6, 0, 0.25], codoI: [0.9, 0, 0],
     hombroD: [2.45, 0, -0.2], codoD: [0.55, 0, 0],
   },
+  // Alumnos de fondo escribiendo: con el torso elevado (modelo.elevarTorso) las manos quedan
+  // apoyadas sobre la tapa del banco y no por debajo (valores medidos con los tres modelos)
+  escribirFondo: {
+    torso: [0, 0, 0], cabeza: [-0.25, 0, 0],
+    hombroI: [0.5, 0, 0], codoI: [1.2, 0, 0], munecaI: [0, -1.2, 0],
+    hombroD: [0.6, 0, 0], codoD: [1.1, 0, 0], munecaD: [0, 1.2, 0],
+  },
   // Golpes de lapicera: antebrazo derecho elevado (la capa "golpear" lo baja y sube)
   golpear: {
     torso: [-0.12, 0, 0], cabeza: [-0.2, 0, 0],
@@ -88,17 +95,19 @@ export const POSES = {
     hombroI: [0.55, 0, 0.55], codoI: [1.75, 0, 0],
     hombroD: [0.5, 0, -0.55], codoD: [1.8, 0, 0],
   },
-  // Sofi: cartelito con el número de pregunta en la izquierda y dedos en la derecha
+  // Sofi: cartelito con el número de pregunta en la izquierda y los dedos en la derecha.
+  // Antebrazo izquierdo levantado con el cartel y brazo derecho arriba con los dedos; el cartel y
+  // la mano se agrandan un poco y se orientan al jugador (ver Senias.js).
   seniaCartel: {
     torso: [-0.02, 0, 0], cabeza: [0, 0, 0],
-    hombroI: [1.35, 0, 0.35], codoI: [0.75, 0, 0],
-    hombroD: [2.45, 0, -0.2], codoD: [0.55, 0, 0],
+    hombroI: [1.5, 0, -0.9], codoI: [1.8, 0, 0],
+    hombroD: [2.1, 0, 0.5], codoD: [1.0, 0, 0],
   },
   // Sofi pidiendo: cartelito con "¿N?" y la otra mano abierta, como preguntando
   seniaPedido: {
     torso: [0.02, 0, 0], cabeza: [0.08, 0, 0.15],
-    hombroI: [1.35, 0, 0.35], codoI: [0.75, 0, 0],
-    hombroD: [0.95, 0, 0.45], codoD: [0.9, 0, 0],
+    hombroI: [1.5, 0, -0.9], codoI: [1.8, 0, 0],
+    hombroD: [1.6, 0, 0.6], codoD: [1.4, 0, 0],
   },
   // Tomi atrapando un papelito
   atrapar: {
@@ -169,6 +178,7 @@ export const POSES = {
 // Valores en POSES_MANO (Manos.js). [izquierda, derecha]
 const MANOS_POR_POSE = {
   escribir: ['plana', 'lapicera'],
+  escribirFondo: ['plana', 'lapicera'],
   golpear: ['plana', 'lapicera'],
   disimular: ['plana', 'lapicera'],
   manosEnBanco: ['plana', 'plana'],
@@ -208,34 +218,53 @@ const CAPAS = {
   },
   // Ciclo de marcha. La fase la avanza quien mueve al personaje según la DISTANCIA recorrida
   // (an.faseCaminar), así los pies no patinan aunque cambie la velocidad.
+  // Convención de signos: en brazos y piernas +x = hacia adelante; en torso y cabeza +x = hacia atrás.
   caminar: (t, f, vel = 1, an) => {
     const fase = an?.faseCaminar ?? t * 7 * vel + f;
     const s = Math.sin(fase);
     const c = Math.cos(fase);
-    const A = an?.zancada ?? 0.3;                 // amplitud del muslo (radianes)
+    const A = an?.zancada ?? 0.34; // amplitud del muslo (radianes)
     const k = A / 0.3;
+    const v = an?.velCamina ?? 0.7; // velocidad real (m/s): inclina el cuerpo al arrancar y al ir rápido
+    const bb = an?.balanceoBrazos ?? 1; // los brazos acompañan (0 = manos atrás)
     // La rodilla se dobla mientras la pierna avanza (balanceo) y queda casi recta al apoyar
-    const rodI = -(0.06 + 0.8 * Math.pow(Math.max(0, c), 1.5)) * k;
-    const rodD = -(0.06 + 0.8 * Math.pow(Math.max(0, -c), 1.5)) * k;
-    const bb = an?.balanceoBrazos ?? 1;          // los brazos acompañan (0 = manos atrás)
+    const rodI = -(0.08 + 0.8 * Math.pow(Math.max(0, c), 1.5)) * k;
+    const rodD = -(0.08 + 0.8 * Math.pow(Math.max(0, -c), 1.5)) * k;
+    const swing = 0.46 * bb * Math.min(1.25, 0.5 + v) * k; // vaivén de los brazos
     return {
       piernaI: [s * A, 0, 0],
       piernaD: [-s * A, 0, 0],
       rodillaI: [rodI, 0, 0],
       rodillaD: [rodD, 0, 0],
-      // El pie se mantiene casi paralelo al piso
-      tobilloI: [-(s * A + rodI) * 0.55, 0, 0],
-      tobilloD: [-(-s * A + rodD) * 0.55, 0, 0],
-      // La pelvis gira con la pierna que avanza y el torso compensa
-      cadera: [0, s * 0.08 * k, Math.sin(fase * 2) * 0.015],
-      torso: [0.03 * k, -s * 0.13 * k, -Math.sin(fase * 2) * 0.015],
-      hombroI: [-s * 0.32 * bb * k, 0, 0],
-      hombroD: [s * 0.32 * bb * k, 0, 0],
-      codoI: [(0.12 + Math.max(0, -s) * 0.25) * bb, 0, 0],
-      codoD: [(0.12 + Math.max(0, s) * 0.25) * bb, 0, 0],
-      cabeza: [0, s * 0.05 * k, 0],
+      // El pie llega con la punta arriba (talón) y despega con la punta abajo
+      tobilloI: [-(s * A + rodI) * 0.7, 0, 0],
+      tobilloD: [-(-s * A + rodD) * 0.7, 0, 0],
+      // La pelvis gira con la pierna que avanza, se inclina hacia el lado de la pierna que
+      // se balancea y se desplaza sobre el pie de apoyo; el torso contrarresta
+      cadera: [0, s * 0.1 * k, -c * 0.035 * k],
+      caderaX: [c * 0.024 * k, 0, 0],
+      torso: [-Math.min(0.09, v * 0.08), -s * 0.17 * k, c * 0.022 * k],
+      // Brazos contra-fase, algo separados del cuerpo y con el codo que acompaña
+      hombroI: [-s * swing, 0, -0.07],
+      hombroD: [s * swing, 0, 0.07],
+      codoI: [(0.2 + Math.max(0, -s) * 0.45) * bb, 0, 0],
+      codoD: [(0.2 + Math.max(0, s) * 0.45) * bb, 0, 0],
+      // La cabeza compensa el giro del torso y acompaña con un leve cabeceo
+      cabeza: [Math.cos(fase * 2) * 0.014, s * 0.06 * k, 0],
       // Sube y baja: más alto con la pierna vertical, más bajo con las piernas abiertas
-      caderaY: [(Math.cos(fase * 2) * 0.018 - 0.012) * k, 0, 0],
+      caderaY: [(Math.cos(fase * 2) * 0.022 - 0.016) * k, 0, 0],
+    };
+  },
+  // Quieto pero vivo: cambios de peso, respiración y micro-movimientos de cabeza y hombros
+  vivo: (t, f) => {
+    const w = Math.sin(t * 0.55 + f);
+    return {
+      caderaX: [w * 0.014, 0, 0],
+      cadera: [0, Math.sin(t * 0.31 + f) * 0.03, w * 0.022],
+      torso: [Math.sin(t * 1.6 + f) * 0.014, Math.sin(t * 0.37 + f * 1.3) * 0.03, -w * 0.035],
+      cabeza: [Math.sin(t * 0.9 + f) * 0.025, Math.sin(t * 0.43 + f * 2) * 0.08, w * 0.02],
+      hombroI: [Math.sin(t * 0.8 + f) * 0.025, 0, Math.sin(t * 0.6 + f) * 0.02],
+      hombroD: [Math.sin(t * 0.8 + f + 2) * 0.025, 0, -Math.sin(t * 0.6 + f + 1) * 0.02],
     };
   },
   reclamo: (t, f) => ({
@@ -291,7 +320,10 @@ export class Animador {
       const a = this.articulacion(n);
       if (a) this.base[n] = [a.rotation.x, a.rotation.y, a.rotation.z];
     }
-    if (this.p.rig.cadera) this.baseCaderaY = this.p.rig.cadera.position.y;
+    if (this.p.rig.cadera) {
+      this.baseCaderaY = this.p.rig.cadera.position.y;
+      this.baseCaderaX = this.p.rig.cadera.position.x;
+    }
   }
 
   poseInicial(nombre) {
@@ -352,6 +384,8 @@ export class Animador {
     // Rebote vertical de la cadera al caminar
     if (this.baseCaderaY !== undefined && this.p.rig.cadera) {
       this.p.rig.cadera.position.y = this.baseCaderaY + (suma.caderaY ? suma.caderaY[0] : 0);
+      // Desplazamiento lateral de la pelvis (cambio de peso)
+      this.p.rig.cadera.position.x = (this.baseCaderaX ?? 0) + (suma.caderaX ? suma.caderaX[0] : 0);
     }
   }
 }

@@ -27,6 +27,12 @@ const loader = new GLTFLoader();
 // de las manos (cartelito, papelito, lapicera) ya encuentran las articulaciones definitivas.
 const cacheModelos = new Map();
 
+const _v1 = new THREE.Vector3();
+const _v2 = new THREE.Vector3();
+const _v3 = new THREE.Vector3();
+const _v4 = new THREE.Vector3();
+const _v5 = new THREE.Vector3();
+
 export async function precargarModelos(rutas, alProgresar) {
   let listos = 0;
   await Promise.all(
@@ -344,7 +350,7 @@ export class Personaje {
     this.articulaciones = articulaciones;
     this.conModelo = true;
 
-    // Mano "postiza" con dedos exagerados para las señas (la mano del modelo se esconde mientras tanto)
+    // Lapicera (y mano postiza de respaldo si no se detectaron los dedos del modelo)
     const matPiel = toon(m.piel ?? cfg.piel ?? 0xeec29c);
     for (const [lado, signo] of [['brazoI', -1], ['brazoD', 1]]) {
       const br = rig[lado];
@@ -380,6 +386,8 @@ export class Personaje {
     if (sentado) {
       rig.cadera.position.y = m.alturaCadera ?? 0.52;
       rig.cadera.position.z += m.offsetCaderaZ ?? 0.04;
+      // Torso más alto (sentarse derecho): sube el tronco, la cabeza y los brazos; las piernas quedan
+      if (m.elevarTorso) rig.torso.position.y += m.elevarTorso;
       for (const [lado, signo] of [['I', -1], ['D', 1]]) {
         rig['pierna' + lado].rotation.set(Math.PI / 2 - 0.05, 0, -signo * 0.06);
         rig['rodilla' + lado].rotation.set(-Math.PI / 2 + 0.12, 0, signo * 0.04);
@@ -390,6 +398,57 @@ export class Personaje {
     // Primera persona: la cabeza no se dibuja (la cámara está ahí)
     if (cfg.soloBrazos) rig.cabeza.scale.setScalar(0.001);
     this.animador.poseInicial(sentado ? (cfg.soloBrazos ? 'manosEnBanco' : 'sentado') : 'parado');
+  }
+
+  // ---------- Mano de señas (Sofi): agrandada y con la palma hacia el jugador ----------
+  estadoManoSenia(lado) {
+    this._manoSenia ??= {
+      I: { escala: 1, objetivo: 1, giro: 0, punto: null },
+      D: { escala: 1, objetivo: 1, giro: 0, punto: null },
+    };
+    return this._manoSenia[lado === 'brazoI' || lado === 'I' ? 'I' : 'D'];
+  }
+
+  /** Agranda (o devuelve a su tamaño) la mano del modelo, con transición suave. */
+  escalarMano(lado, factor) {
+    this.estadoManoSenia(lado).objetivo = factor;
+  }
+
+  /** Gira la muñeca para que la palma mire a un punto del mundo (null = sin girar). */
+  orientarPalma(lado, punto) {
+    const e = this.estadoManoSenia(lado);
+    e.punto = punto ? (e.punto ?? new THREE.Vector3()).copy(punto) : null;
+  }
+
+  actualizarManoSenia(dt) {
+    if (!this._manoSenia) return;
+    const k = 1 - Math.exp(-8 * dt);
+    for (const lado of ['I', 'D']) {
+      const e = this._manoSenia[lado];
+      const br = this.rig['brazo' + lado];
+      if (!br?.manoModelo) continue;
+      e.escala += (e.objetivo - e.escala) * k;
+      br.manoModelo.scale.setScalar(e.escala);
+      let giro = 0;
+      if (e.punto) {
+        // La palma mira hacia -x local en la mano derecha y +x en la izquierda (pose de atadura).
+        // Se gira alrededor del eje del antebrazo (y local) hasta que apunte al punto.
+        br.muneca.updateWorldMatrix(true, false);
+        const m = br.muneca.matrixWorld;
+        const eje = _v1.setFromMatrixColumn(m, 1).normalize();
+        const centro = _v2.setFromMatrixPosition(m);
+        const normal = _v3.set(lado === 'D' ? -1 : 1, 0, 0).transformDirection(m);
+        const meta = _v4.copy(e.punto).sub(centro);
+        normal.addScaledVector(eje, -normal.dot(eje)).normalize();
+        meta.addScaledVector(eje, -meta.dot(eje));
+        if (meta.lengthSq() > 1e-6) {
+          meta.normalize();
+          giro = Math.atan2(eje.dot(_v5.crossVectors(normal, meta)), normal.dot(meta));
+        }
+      }
+      e.giro += (giro - e.giro) * k;
+      br.muneca.rotation.y += e.giro;
+    }
   }
 
   // Mano "postiza" con dedos exagerados: sólo si no se pudieron detectar los dedos del modelo
@@ -562,6 +621,7 @@ export class Personaje {
     this.mixer?.update(dt);
     this.animador.update(dt, t);
     this.manos?.update(dt);
+    this.actualizarManoSenia(dt);
     if (this.pivoteModelo) this.animarModeloEstatico(dt, t);
   }
 }

@@ -36,7 +36,7 @@ export function crearElenco(aula, scene) {
   for (const banco of aula.bancos) {
     if (ocupados.has(banco)) continue;
     const p = sentar(crearPersonaje(configRelleno(rnd), 'relleno'), banco);
-    p.animador.poseInicial('escribir');
+    p.animador.poseInicial('escribirFondo');
     p.animador.capa('escribir', 0.4 + rnd() * 0.6);
     elenco.relleno.push(p);
   }

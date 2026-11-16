@@ -278,9 +278,16 @@ export class Intro {
       const diff = Math.atan2(Math.sin(objetivoAng - p.raiz.rotation.y), Math.cos(objetivoAng - p.raiz.rotation.y));
       p.raiz.rotation.y += diff * (1 - Math.exp(-5 * dt));
       an.faseCaminar += (paso / 0.62) * Math.PI;
-      an.zancada = 0.3;
-      an.balanceoBrazos = 0.9;
-      an.capa('caminar', p.destino ? 1 : 0);
+      // Girar en el lugar con pasitos (en vez de rotar patinando sobre los pies)
+      const giro = Math.abs(diff * (1 - Math.exp(-5 * dt)));
+      const girando = !p.destino && giro / dt > 0.35;
+      if (girando) an.faseCaminar += giro * 1.8;
+      an.zancada = girando ? 0.14 : 0.34;
+      an.velCamina = p.velActual ?? 0;
+      an.balanceoBrazos = girando ? 0.3 : 1;
+      an.capa('caminar', p.destino || girando ? 1 : 0);
+      // Parados no quedan congelados: cambian el peso, respiran, mueven la cabeza
+      an.capa('vivo', p.destino || girando ? 0 : 1);
       p.update(dt, this.reloj);
     }
   }
