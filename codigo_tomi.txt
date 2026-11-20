@@ -1,0 +1,1211 @@
+﻿import * as THREE from 'three';
+import { bus } from '../core/EventBus.js';
+import { CONTROLES } from '../core/controles.js';
+import { estado, participar } from '../core/GameState.js';
+import { NOMBRES } from '../characters/config.js';
+import { toon, contorno } from '../world/materiales.js';
+
+const azar = (a, b) => a + Math.random() * (b - a);
+const elegir = (lista) => lista[Math.floor(Math.random() * lista.length)];
+
+/**
+ * Reto del mensajero (Tomi, esquina del fondo a la derecha) y fÃ­sica de los papelitos.
+ *  1. Tomi espera a que la profesora estÃ© distraÃ­da y lanza un papelito en parÃ¡bola hacia tu banco.
+ *  2. Lo atrapÃ¡s con clic izquierdo cuando entra en tu zona de alcance (si no, cae y hace ruido).
+ *  3. Lo abrÃ­s bajo el banco y leÃ©s el pedido; consultÃ¡s el machete (E).
+ *  4. Lo devolvÃ©s: mantenÃ© clic derecho para cargar fuerza (con arco visible) y soltÃ¡.
+ *     El temblor del pÃ¡nico desvÃ­a el arco. Si no llega, cae en el pasillo: ruido y mucha sospecha.
+ */
+export class Papelitos {
+  constructor({ scene, aula, elenco, profesora, camara, hud, examen, balance, input, resaltado, brazos }) {
+    this.scene = scene;
+    this.aula = aula;
+    this.tomi = elenco.mensajero;
+    this.prota = elenco.protagonista;
+    this.ia = profesora;
+    this.camara = camara;
+    this.hud = hud;
+    this.examen = examen;
+    this.b = balance.papelitos;
+    this.l = balance.lanzamiento;
+    this.finales = balance.finales;
+    this.urgente = false;      // reto final: pedido urgente de Tomi
+    this.forzarFallo = false;  // reto final: el lanzamiento falla por el temblor
+    this.puntos = balance.compromiso.porPapelito;
+    this.input = input;
+    this.resaltado = resaltado;
+    this.brazos = brazos;
+    this.nombre = NOMBRES.mensajero;
+
+    this.papeles = [];
+    this.fase = 'espera';
+    this.timer = this.b.esperaInicial;
+    this.abriendo = 0;
+    this.carga = 0;
+    this.gravedad = new THREE.Vector3(0, -this.b.gravedad, 0);
+
+    // GeometrÃ­a y material compartidos del papel arrugado
+    this.geo = new THREE.IcosahedronGeometry(this.b.radio * 1.4, 0);
+    this.mat = toon(0xfbfaf2);
+
+    // Punto donde el jugador atrapa (sobre el banco, frente a las manos)
+    const c = aula.bancoCentral;
+    this.puntoAtrape = new THREE.Vector3(c.posicion.x, 1.0, c.posicion.z + 0.1);
+    // Blanco del jugador al devolver: las manos de Tomi sobre su banco
+    this.blancoTomi = this.tomi.banco.posicion.clone().add(new THREE.Vector3(0, 0.3, 0.25));
+
+
+ // Papel en la mano del protagonista (debajo de la palma, sin atravesar el dorso)
+    this.papelMano = new THREE.Mesh(this.geo, this.mat);
+    contorno(this.papelMano, 0.003);
+    this.papelMano.scale.setScalar(0.55);
+    this.papelMano.position.set(0.035, -0.065, -0.015);
+    this.papelMano.visible = false;
+    this.prota.rig.brazoD.muneca.add(this.papelMano);
+    brazos.papelEnMano = this.papelMano;
+
+// Hojita desplegada que se ve entre ambas manos al abrir el papel bajo el banco
+    this.papelAbierto = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.11, 0.08, 2, 1),
+      new THREE.MeshBasicMaterial({ color: 0xfbfaf2, side: THREE.DoubleSide }),
+    );
+    contorno(this.papelAbierto, 0.002);
+    const posHoja = this.papelAbierto.geometry.attributes.position;
+    for (let i = 0; i < posHoja.count; i++) {
+      if (Math.abs(posHoja.getX(i)) < 0.01) posHoja.setZ(i, 0.008);
+    }
+    this.papelAbierto.geometry.computeVertexNormals();
+    this.papelAbierto.visible = false;
+    this.scene.add(this.papelAbierto);
+    brazos.papelAbierto = this.papelAbierto;
+
+    // Arco de trayectoria: una hilera de puntos (se ve mejor que una lÃ­nea de 1 px)
+    const n = this.l.puntosArco;
+    this.arco = new THREE.InstancedMesh(
+      new THREE.SphereGeometry(0.022, 8, 6),
+      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, depthTest: false }),
+      n,
+    );
+    this.arco.frustumCulled = false;
+    this.arco.renderOrder = 10;
+    this.arco.visible = false;
+    this._m = new THREE.Matrix4();
+    scene.add(this.arco);
+    const geoMarca = new THREE.RingGeometry(0.12, 0.17, 24);
+    geoMarca.rotateX(-Math.PI / 2);
+    this.marcaCaida = new THREE.Mesh(geoMarca, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85, depthTest: false }));
+    this.marcaCaida.renderOrder = 10;
+    this.marcaCaida.visible = false;
+    scene.add(this.marcaCaida);
+
+    // Tomi se resalta cuando tenÃ©s un papel listo para devolverle
+    resaltado.registrar({
+      objeto: this.tomi.raiz,
+      punto: (v) => this.tomi.posicionCabeza(v),
+      activo: () => !!estado.papelEnMano?.consultado,
+      tolerancia: 20,
+    });
+
+    bus.on('mouse', ({ boton, abajo }) => {
+      if (estado.pausado || estado.final || estado.accion.modoHoja) return;
+      if (boton === CONTROLES.botonInteractuar && abajo) this.intentarAtrapar();
+      if (boton === CONTROLES.botonLanzar) {
+        if (abajo) this.empezarApuntar();
+        else this.soltar();
+      }
+    });
+    bus.on('modoHoja', (activo) => {
+      if (activo && estado.accion.apuntando) this.cancelarApuntar();
+    });
+
+    hud.registrarAcciones(() => {
+      if (estado.accion.modoHoja) return [];
+      const acciones = [];
+      if (this.papelAtrapable()) acciones.push({ tecla: 'Clic', texto: 'Â¡atrapar el papelito!' });
+      if (estado.papelEnMano && !estado.accion.abriendoPapel) {
+        if (!estado.papelEnMano.consultado) {
+          acciones.push({ tecla: 'E', texto: estado.macheteGuardado ? 'ya no tenÃ©s machete' : 'consultÃ¡ el machete' });
+        } else {
+          acciones.push({ tecla: 'Clic der.', texto: `mantener y soltar: devolverle el papel a ${this.nombre}` });
+        }
+      }
+      return acciones;
+    });
+  }
+
+  // ---------- Papeles ----------
+  crearPapel(posicion, velocidad, origen) {
+    const mesh = new THREE.Mesh(this.geo, this.mat);
+    contorno(mesh, 0.006);
+    mesh.position.copy(posicion);
+    mesh.castShadow = true;
+    this.scene.add(mesh);
+    const papel = { mesh, vel: velocidad.clone(), origen, estado: 'vuelo', vida: this.b.vidaEnPiso, giro: new THREE.Vector3(azar(-9, 9), azar(-9, 9), azar(-9, 9)), toco: false };
+    if (origen === 'mensajero') {
+      papel.item = {
+        objeto: mesh,
+        punto: (v) => v.copy(mesh.position),
+        activo: () => papel.estado === 'vuelo' && this.alcanzable(papel),
+        tolerancia: 25,
+      };
+      papel.quitarResaltado = this.resaltado.registrar(papel.item);
+    }
+    this.papeles.push(papel);
+    return papel;
+  }
+
+  quitarPapel(papel) {
+    this.scene.remove(papel.mesh);
+    papel.quitarResaltado?.();
+    this.papeles = this.papeles.filter((p) => p !== papel);
+  }
+
+  alcanzable(papel) {
+    return papel.mesh.position.distanceTo(this.puntoAtrape) < this.b.radioAtrape;
+  }
+
+  papelAtrapable() {
+    return this.papeles.find((p) => p.origen === 'mensajero' && p.estado === 'vuelo' && this.alcanzable(p));
+  }
+
+  // Velocidad inicial para llegar de "desde" a "hasta" en un tiempo dado (tiro parabÃ³lico)
+  velocidadPara(desde, hasta, tiempo) {
+    return new THREE.Vector3()
+      .subVectors(hasta, desde)
+      .addScaledVector(this.gravedad, -0.5 * tiempo * tiempo)
+      .divideScalar(tiempo);
+  }
+
+  // Integra un paso de fÃ­sica con rebotes en el piso, los bancos y las paredes
+  integrar(papel, dt) {
+    const m = papel.mesh;
+    const r = this.b.radio;
+    papel.vel.addScaledVector(this.gravedad, dt);
+    m.position.addScaledVector(papel.vel, dt);
+    m.rotation.x += papel.giro.x * dt;
+    m.rotation.y += papel.giro.y * dt;
+    m.rotation.z += papel.giro.z * dt;
+
+    let superficie = null;
+    // Tapas de los bancos
+    if (papel.vel.y < 0) {
+      for (const banco of this.aula.bancos) {
+        const p = banco.posicion;
+        if (Math.abs(m.position.x - p.x) < 0.36 && Math.abs(m.position.z - p.z) < 0.25 && m.position.y - r < p.y && m.position.y > p.y - 0.08) {
+          m.position.y = p.y + r;
+          superficie = { tipo: 'banco', banco };
+          break;
+        }
+      }
+    }
+    // Piso
+    if (!superficie && m.position.y < r) {
+      m.position.y = r;
+      superficie = { tipo: 'piso' };
+    }
+    // Paredes
+    const l = this.aula.limites;
+    if (m.position.x < l.xMin + r || m.position.x > l.xMax - r) {
+      m.position.x = THREE.MathUtils.clamp(m.position.x, l.xMin + r, l.xMax - r);
+      papel.vel.x *= -0.4;
+    }
+    if (m.position.z < l.zMin + r || m.position.z > l.zMax - r) {
+      m.position.z = THREE.MathUtils.clamp(m.position.z, l.zMin + r, l.zMax - r);
+      papel.vel.z *= -0.4;
+    }
+
+    if (superficie) {
+      const impacto = Math.abs(papel.vel.y);
+      papel.vel.y = impacto > 0.6 ? impacto * this.b.rebote : 0;
+      const roce = Math.max(0, 1 - this.b.friccion * dt);
+      papel.vel.x *= roce;
+      papel.vel.z *= roce;
+      papel.giro.multiplyScalar(roce);
+      if (!papel.toco) {
+        papel.toco = true;
+        this.alTocarSuperficie(papel, superficie);
+      }
+      if (papel.vel.lengthSq() < 0.01) papel.estado = 'quieto';
+    }
+  }
+
+  alTocarSuperficie(papel, superficie) {
+    const pos = papel.mesh.position.clone();
+    bus.emit('papelCae', { posicion: pos, origen: papel.origen });
+    if (papel.origen === 'mensajero') {
+      // No lo atrapaste: cae y hace ruido cerca de tu banco
+      bus.emit('ruido', { posicion: pos, intensidad: this.b.ruidoCaida, tipo: 'papel' });
+      estado.registro.ignorados += 1;
+      this.hud.subtitulo(`[Un papelito cae ${superficie.tipo === 'piso' ? 'al piso' : 'sobre un banco'} ${this.hud.direccionTexto(pos)}]`);
+      this.hud.indicar({ tipo: 'papel', posicion: pos, etiqueta: 'papel', icono: 'ðŸ“„', duracion: 2 });
+      this.tomiReclama();
+      this.fase = 'espera';
+      this.timer = azar(this.b.intervaloMin, this.b.intervaloMax);
+    } else if (papel.origen === 'jugador') {
+      // Tu devoluciÃ³n no llegÃ³: cae en el pasillo, mucho ruido y mucha sospecha
+      bus.emit('ruido', { posicion: pos, intensidad: this.b.ruidoFallo, tipo: 'papel' });
+      bus.emit('sospechaExtra', { cantidad: this.b.sospechaPorFallo });
+      bus.emit('lanzamientoFallido', { posicion: pos });
+      participar(this.puntos * 0.3);
+      this.hud.subtitulo('[Â¡El papelito cae en el pasillo!]', 3);
+      this.hud.indicar({ tipo: 'papel', posicion: pos, etiqueta: 'papel', icono: 'ðŸ“„', duracion: 2.5 });
+      this.tomiReclama();
+    }
+  }
+
+  tomiReclama() {
+    const a = this.tomi.animador;
+    a.pose('reclamo', 6);
+    a.capa('reclamo', 1);
+    setTimeout(() => {
+      a.capa('reclamo', 0);
+      a.pose('sentado', 4);
+    }, 1600);
+  }
+
+  // ---------- Tomi lanza ----------
+  oportunidad() {
+    if (this.ia.estado !== 'patrulla') return false;
+    if (this.ia.enPizarron) return true;
+    const pos = this.tomi.raiz.position;
+    return this.ia.posicion.distanceTo(this.aula.bancoCentral.posicion) > 5 && !this.ia.mirandoHacia(pos, 60) && !this.ia.mirandoHacia(this.aula.bancoCentral.posicion, 60);
+  }
+
+  tomiPrepara() {
+    this.fase = 'preparando';
+    this.timer = this.b.tiempoAviso ?? 1.8;
+    this.tomi.animador.pose('prepararLanzar', 6);
+    this.mirarTomi(true);
+
+    // PosiciÃ³n de Tomi para el audio y el indicador del HUD
+    const pos = this.tomi.raiz.position.clone().setY(1.1);
+    const intensidad = (this.b.intensidadAviso ?? 0.14) + 0.15 * (this.ia.escalada ?? 0);
+
+    // Eventos de audio y alerta para la IA (ruido sutil)
+    bus.emit('tomiAvisa', { posicion: pos });
+    bus.emit('ruido', { posicion: pos, intensidad, tipo: 'susurro' });
+
+    // Feedback claro en HUD con direcciÃ³n espacial
+    this.hud.indicar({ tipo: 'susurro', posicion: pos, etiqueta: 'Â¡pst!', icono: 'ðŸ¤«', duracion: this.timer });
+    this.hud.subtitulo(`[Â¡Pst! ${this.nombre} te llama ${this.hud.direccionTexto(pos)}]`, 2.2);
+  }
+
+  tomiLanza() {
+    this.tomi.animador.pose('lanzar', 16);
+    const desde = this.tomi.rig.brazoD.muneca.getWorldPosition(new THREE.Vector3());
+    const error = this.b.errorLanzamiento;
+    const hasta = this.puntoAtrape.clone().add(new THREE.Vector3(azar(-error, error), azar(-error, error), azar(-error, error)));
+    const vel = this.velocidadPara(desde, hasta, this.b.tiempoVuelo);
+    const papel = this.crearPapel(desde, vel, 'mensajero');
+    papel.pregunta = elegir(this.examen.datos.machete.paraAmigos);
+    papel.urgente = this.urgente;
+    bus.emit('papelLanzado', { posicion: desde });
+    this.hud.subtitulo(`[${this.nombre} te tira un papelito]`, 2);
+    this.hud.indicar({ tipo: 'papel', posicion: desde, etiqueta: 'papelito', icono: 'ðŸ“„', duracion: 1.5 });
+    this.fase = 'enVuelo';
+    setTimeout(() => {
+      this.tomi.animador.pose('sentado', 4);
+      this.mirarTomi(false);
+    }, 600);
+  }
+
+  mirarTomi(activo) {
+    const ex = (this.tomi.animador.extra.cabeza ??= [0, 0, 0]);
+    const tor = (this.tomi.animador.extra.torso ??= [0, 0, 0]);
+    if (!activo) {
+      ex[1] = 0;
+      tor[1] = 0;
+      return;
+    }
+    const pos = this.tomi.raiz.position;
+    const c = this.aula.bancoCentral.asiento;
+    const ang = Math.atan2(-(c.x - pos.x), -(c.z - pos.z));
+    tor[1] = ang * 0.5;
+    ex[1] = ang * 0.4;
+  }
+
+  // ---------- El jugador atrapa, abre y devuelve ----------
+  intentarAtrapar() {
+    const papel = this.papelAtrapable();
+    if (!papel || estado.papelEnMano) return;
+    this.quitarPapel(papel);
+    estado.papelEnMano = { pregunta: papel.pregunta, consultado: false, desde: estado.tiempo, urgente: !!papel.urgente };
+    estado.accion.abriendoPapel = true;
+    this.abriendo = this.b.tiempoAbrir;
+    this.fase = 'esperandoRespuesta';
+    this.timer = this.b.tiempoLimiteRespuesta;
+    bus.emit('papelAtrapado');
+    this.hud.subtitulo('[Atrapaste el papelito: lo abrÃ­s debajo del banco]', 2);
+  }
+
+  empezarApuntar() {
+    const p = estado.papelEnMano;
+    if (!p || estado.accion.abriendoPapel) return;
+    if (!p.consultado) {
+      this.hud.mensaje(estado.macheteGuardado ? 'Ya guardaste el machete: no tenÃ©s quÃ© contestarle.' : 'Primero consultÃ¡ el machete (mantenÃ© E) para escribir la respuesta.', 3);
+      return;
+    }
+    estado.accion.apuntando = true;
+    this.carga = 0;
+  }
+
+  cancelarApuntar() {
+    estado.accion.apuntando = false;
+    this.arco.visible = false;
+    this.marcaCaida.visible = false;
+    this.hud.setFuerza(null);
+  }
+
+  // Origen y velocidad del lanzamiento segÃºn la mirada, la carga y el temblor del pÃ¡nico
+  parametrosLanzamiento(t) {
+    const origen = this.camara.posicionOjos(new THREE.Vector3()).add(new THREE.Vector3(0, -0.12, 0));
+    const dir = this.camara.direccion(new THREE.Vector3());
+    // El brazo puede tirar un poco mÃ¡s allÃ¡ de donde llega la mirada (para alcanzar las esquinas)
+    let yaw = Math.atan2(-dir.x, -dir.z) * this.l.factorGiroBrazo;
+    let pitch = Math.asin(THREE.MathUtils.clamp(dir.y, -1, 1)) + this.l.anguloElevacion;
+    // El temblor del pÃ¡nico desvÃ­a la punterÃ­a (no depende de la opciÃ³n de vibraciÃ³n: es mecÃ¡nica)
+    const temblor = (estado.panico ?? 0) * this.l.temblorMax * (this.forzarFallo ? 2.5 : 1);
+    yaw += (Math.sin(t * 7.3) + Math.sin(t * 13.1) * 0.6) * temblor;
+    pitch += (Math.sin(t * 9.7 + 1) + Math.sin(t * 5.3) * 0.6) * temblor;
+    const rapidez = THREE.MathUtils.lerp(this.l.velocidadMin, this.l.velocidadMax, this.carga);
+    const vel = new THREE.Vector3(-Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch)).multiplyScalar(rapidez);
+    origen.addScaledVector(vel.clone().setY(0).normalize(), 0.25);
+    return { origen, vel };
+  }
+
+  actualizarArco(t) {
+    const { origen, vel } = this.parametrosLanzamiento(t);
+    const p = origen.clone();
+    const v = vel.clone();
+    const paso = 0.04;
+    let n = 0;
+    // El primer tramo queda pegado a la cÃ¡mara: se saltean algunos puntos
+    for (let i = 0; i < 4; i++) {
+      v.addScaledVector(this.gravedad, paso);
+      p.addScaledVector(v, paso);
+    }
+    for (; n < this.l.puntosArco; n++) {
+      // los puntos se agrandan con la distancia para que se lean parejos
+      const escala = 0.6 + n * 0.04;
+      this._m.makeScale(escala, escala, escala).setPosition(p);
+      this.arco.setMatrixAt(n, this._m);
+      v.addScaledVector(this.gravedad, paso);
+      p.addScaledVector(v, paso);
+      if (p.y < 0.02) {
+        n++;
+        break;
+      }
+    }
+    this.arco.count = n;
+    this.arco.instanceMatrix.needsUpdate = true;
+    this.arco.visible = true;
+    this.marcaCaida.position.set(p.x, Math.max(0.02, p.y) + 0.01, p.z);
+    this.marcaCaida.visible = true;
+  }
+
+  soltar() {
+    if (!estado.accion.apuntando) return;
+    const { origen, vel } = this.parametrosLanzamiento(performance.now() / 1000);
+    if (this.forzarFallo) {
+      // Reto final: el temblor arruina el tiro, el papel se va al pasillo y cae corto
+      const desvio = this.finales.desvioFalloFinal * (Math.random() < 0.5 ? -1 : 1);
+      vel.applyAxisAngle(new THREE.Vector3(0, 1, 0), desvio).multiplyScalar(this.finales.factorVelocidadFalloFinal);
+      vel.y = Math.abs(vel.y) * 0.5 + 0.6;
+    }
+    this.cancelarApuntar();
+    const papel = this.crearPapel(origen, vel, 'jugador');
+    papel.pregunta = estado.papelEnMano.pregunta;
+    estado.papelEnMano = null;
+    this.brazos.gestoLanzar();
+    bus.emit('papelDevuelto', { posicion: origen });
+    this.fase = 'devuelto';
+  }
+
+  // ---------- Loop ----------
+  update(dt) {
+    const t = performance.now() / 1000;
+
+    // FÃ­sica de los papeles
+    for (const papel of [...this.papeles]) {
+      if (papel.estado === 'vuelo') {
+        this.integrar(papel, dt);
+        // Â¿Tu devoluciÃ³n llegÃ³ a las manos de Tomi?
+        if (papel.origen === 'jugador' && !papel.toco && papel.mesh.position.distanceTo(this.blancoTomi) < this.b.radioExito) {
+          this.quitarPapel(papel);
+          this.tomiAtrapa();
+          continue;
+        }
+      } else {
+        papel.vida -= dt;
+        if (papel.vida <= 0) this.quitarPapel(papel);
+      }
+    }
+
+// Abriendo el papel bajo el banco (pequeÃ±a animaciÃ³n con la cÃ¡mara)
+    if (estado.accion.abriendoPapel) {
+      this.abriendo -= dt;
+      const avance = 1 - Math.max(0, this.abriendo) / this.b.tiempoAbrir;
+      const mezcla = Math.min(1, Math.sin(Math.min(1, avance) * Math.PI) * 1.4);
+      this.camara.solicitarMirada('papel', { mezcla: Math.max(0, mezcla), yaw: 0, pitch: -0.72, adelante: 0.18 });
+
+      // Ubica la hojita exactamente entre ambas manos, ligeramente por encima de las palmas
+      const mI = this.prota.rig.brazoI.muneca.getWorldPosition(new THREE.Vector3());
+      const mD = this.prota.rig.brazoD.muneca.getWorldPosition(new THREE.Vector3());
+      const ojos = this.camara.posicionOjos(new THREE.Vector3());
+      this.papelAbierto.position.lerpVectors(mI, mD, 0.5);
+      this.papelAbierto.position.y += 0.035;
+      this.papelAbierto.position.z -= 0.06;
+      this.papelAbierto.lookAt(ojos);
+
+      if (this.abriendo <= 0) {
+        estado.accion.abriendoPapel = false;
+        this.camara.solicitarMirada('papel', { mezcla: 0 });
+        const n = estado.papelEnMano.pregunta + 1;
+        const urg = estado.papelEnMano.urgente ? 'Â¡Â¡URGENTE!! ' : '';
+        this.hud.mensaje(`El papelito dice: Â«${urg}Â¿quÃ© va en la ${n}?Â» â€” consultÃ¡ el machete y devolvÃ©selo`, 4.5);
+      }
+    }
+
+    if (estado.papelEnMano && !estado.accion.abriendoPapel) {
+      const p = estado.papelEnMano;
+      const urg = p.urgente ? '<b>Â¡URGENTE!</b> ' : '';
+      this.hud.setPedido(`ðŸ“ <b>${this.nombre}:</b> Â«${urg}Â¿quÃ© va en la ${p.pregunta + 1}?Â» ${p.consultado ? 'Â· âœ“ respuesta escrita' : 'Â· falta consultar el machete'}`);
+    } else if (!estado.papelEnMano) {
+      this.hud.setPedido(null);
+    }
+
+    // Apuntando: carga de fuerza y arco visible
+    if (estado.accion.apuntando) {
+      this.carga = Math.min(1, this.carga + dt / this.l.tiempoCarga);
+      this.hud.setFuerza(this.carga);
+      this.actualizarArco(t);
+    }
+
+    if (estado.final) return;
+    this.timer -= dt;
+    switch (this.fase) {
+      case 'espera':
+        if (this.timer <= 0 && !estado.grupoEnojado) {
+          // El pedido urgente del reto final no espera a que la profesora estÃ© distraÃ­da
+          if (!estado.papelEnMano && (this.urgente || this.oportunidad())) this.tomiPrepara();
+          else this.timer = 2;
+        }
+        break;
+      case 'preparando': {
+        // Si la profesora deja de patrullar o mira hacia Tomi, aborta y disimula
+        const peligro = this.ia.estado !== 'patrulla' || this.ia.mirandoHacia(this.tomi.raiz.position, 40);
+        if (peligro && !this.urgente) {
+          this.tomi.animador.pose('disimular', 10);
+          this.mirarTomi(false);
+          this.fase = 'espera';
+          this.timer = azar(8, 14);
+          break;
+        }
+
+        // Si el jugador gira y mira a Tomi, lanza casi al instante (tras al menos 0.45s de aviso)
+        const yaLoMiro = this.timer < (this.b.tiempoAviso - 0.45) &&
+          this.camara.anguloHacia(this.tomi.posicionCabeza(new THREE.Vector3())) < 28;
+
+        if (this.timer <= 0 || yaLoMiro) {
+          this.tomiLanza();
+        }
+        break;
+      }
+      case 'enVuelo':
+        // si nadie lo atrapÃ³, alTocarSuperficie vuelve a 'espera'; si lo atrapaste, pasa a esperar respuesta
+        break;
+      case 'esperandoRespuesta':
+        if (this.timer <= 0 && estado.papelEnMano && !estado.accion.apuntando) {
+          // Tardaste demasiado: Tomi se cansa y vos te quedÃ¡s con el papel arrugado
+          estado.papelEnMano = null;
+          estado.registro.ignorados += 1;
+          this.hud.subtitulo(`[${this.nombre} se cansÃ³ de esperar tu respuesta]`, 3);
+          this.tomiReclama();
+          this.fase = 'espera';
+          this.timer = azar(this.b.intervaloMin, this.b.intervaloMax);
+        }
+        break;
+      case 'devuelto':
+        if (!this.papeles.some((p) => p.origen === 'jugador' && p.estado === 'vuelo')) {
+          this.fase = 'espera';
+          this.timer = azar(this.b.intervaloMin, this.b.intervaloMax);
+        }
+        break;
+    }
+  }
+
+  // Reto final (Acto IV): Tomi tira un pedido urgente aunque la profesora estÃ© cerca
+  lanzarUrgente() {
+    this.urgente = true;
+    this.forzarFallo = true;
+    if (this.fase === 'espera') this.timer = Math.min(this.timer, 2.5);
+  }
+
+  tomiAtrapa() {
+    const a = this.tomi.animador;
+    a.pose('atrapar', 14);
+    setTimeout(() => a.pose('sentado', 4), 700);
+    estado.registro.papelitosDevueltos += 1;
+    participar(this.puntos, { intercambio: true });
+    this.hud.subtitulo(`[${this.nombre} atrapÃ³ tu papelito]`, 2.5);
+    bus.emit('papelEntregado');
+  }
+}
+import { poseSenia } from '../characters/Manos.js';
+import * as THREE from 'three';
+import { bus } from '../core/EventBus.js';
+import { CONTROLES } from '../core/controles.js';
+import { estado, participar } from '../core/GameState.js';
+import { NOMBRES } from '../characters/config.js';
+import { texturaCanvas } from '../world/materiales.js';
+
+const LETRAS = ['A', 'B', 'C', 'D'];
+const azar = (a, b) => a + Math.random() * (b - a);
+const elegir = (lista) => lista[Math.floor(Math.random() * lista.length)];
+
+/**
+ * Reto de las seÃ±as (Sofi, esquina del fondo a la izquierda).
+ * Cuando la profesora estÃ¡ de espaldas o lejos: golpea la lapicera tres veces,
+ * levanta un cartelito con el nÃºmero de pregunta y muestra 1-4 dedos (A-D).
+ *  - "respuesta": ella te pasa la opciÃ³n de una pregunta.
+ *  - "pedido": te pregunta quÃ© va en una pregunta; respondÃ©s mirÃ¡ndola y apretando 1-4.
+ * Para descifrar la seÃ±a hay que sostener la mirada ~1 s; con pÃ¡nico alto es casi ilegible.
+ */
+const ESCALA_CARTEL = 1.8; // el cartel de 0.2 x 0.15 m pasa a 0.36 x 0.27 m
+const ESCALA_MANO_SENIA = 1.6; // la mano de seÃ±as se agranda un poco para que se cuenten los dedos
+
+export class Senias {
+  constructor({ personaje, profesora, camara, hud, examen, balance, resaltado }) {
+    this.p = personaje;
+    this.ia = profesora;
+    this.camara = camara;
+    this.hud = hud;
+    this.examen = examen;
+    this.b = balance.senias;
+    this.puntos = balance.compromiso.porSenia;
+    this.nombre = NOMBRES.senias;
+
+    this.fase = 'espera';
+    this.timer = this.b.esperaInicial;
+    this.senia = null;
+    this.lectura = 0;
+    this.golpesDados = 0;
+    this.dedosTimer = 0;
+    this.yaPasadas = new Set();
+    this.yaPedidas = new Set();
+
+    // Cartelito (una hoja con el nÃºmero de pregunta) en la mano izquierda
+    this.canvasCartel = null;
+    this.texCartel = texturaCanvas(256, 192, (ctx) => {
+      this.canvasCartel = ctx;
+    });
+    // El cartel se agranda (a 5 m un cartelito real no se lee) y flota sobre la mano izquierda,
+    // siempre de frente al jugador (ver posicionarCartel)
+    this.cartel = new THREE.Mesh(new THREE.PlaneGeometry(0.2, 0.15), new THREE.MeshBasicMaterial({ map: this.texCartel, side: THREE.DoubleSide }));
+    this.cartel.scale.setScalar(ESCALA_CARTEL);
+    this.cartel.visible = false;
+    personaje.raiz.add(this.cartel);
+    this._w = new THREE.Vector3();
+    this._o = new THREE.Vector3();
+
+    this._v = new THREE.Vector3();
+    this.item = {
+      objeto: personaje.raiz,
+      punto: (v) => personaje.posicionCabeza(v),
+      activo: () => this.fase === 'senia' || this.fase === 'respuesta',
+      tolerancia: this.b.toleranciaMirada,
+    };
+    resaltado.registrar(this.item);
+    this.resaltado = resaltado;
+
+    bus.on('tecla', ({ code, abajo }) => {
+      if (!abajo || estado.pausado || estado.final || estado.accion.modoHoja) return;
+      const n = CONTROLES.dedos.indexOf(code);
+      if (n >= 0 && this.fase === 'respuesta' && this.mirandoAElla()) this.responder(n);
+    });
+
+    hud.registrarAcciones(() => {
+      if (estado.accion.modoHoja) return [];
+      if (this.fase === 'senia' && this.lectura < 1) return [{ tecla: 'ðŸ‘€', texto: `MirÃ¡ a ${this.nombre} para leer la seÃ±a` }];
+      if (this.fase === 'respuesta') return [{ tecla: '1â€“4', texto: `mirÃ¡ndola: mostrale los dedos (Aâ€“D)` }];
+      return [];
+    });
+  }
+
+  mirandoAElla() {
+    return this.camara.anguloHacia(this.p.posicionCabeza(this._v)) < this.b.toleranciaMirada;
+  }
+
+  // La profesora no puede verla: de espaldas en el pizarrÃ³n o lejos y en patrulla
+  oportunidad() {
+    if (this.ia.estado !== 'patrulla') return false;
+    if (this.ia.enPizarron) return true;
+    const pos = this.p.raiz.position;
+    return this.ia.posicion.distanceTo(pos) > this.b.distanciaProfeSegura && !this.ia.mirandoHacia(pos, 50);
+  }
+
+  dibujarCartel(texto) {
+    // Alto contraste y nÃºmero enorme: se tiene que leer a 5 m
+    const ctx = this.canvasCartel;
+    ctx.fillStyle = '#10163a';
+    ctx.fillRect(0, 0, 256, 192);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(10, 10, 236, 172);
+    ctx.fillStyle = '#0b1030';
+    ctx.font = 'bold 150px Arial, Helvetica, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(texto, 128, 100);
+    this.texCartel.needsUpdate = true;
+  }
+
+  // k dedos extendidos en la mano de seÃ±as (con puÃ±o en 0)
+  mostrarDedosSenia(k) {
+    if (this.p.manos) this.p.manos.forzar('D', poseSenia(k));
+    else this.p.mostrarDedos(k);
+  }
+
+  // Secuencia de la seÃ±a: 0,6 s de puÃ±o mientras sube el brazo, un dedo cada 0,3 s y un pequeÃ±o temblor
+  animarSenia(dt) {
+    const r = this.revelar;
+    if (!r) return;
+    r.t += dt;
+    const k = Math.max(0, Math.min(r.n, Math.floor((r.t - 0.6) / 0.3) + 1));
+    if (k !== r.k) {
+      r.k = k;
+      this.mostrarDedosSenia(k);
+    }
+    const tras = r.t - (0.6 + 0.3 * r.n);
+    const ex = (this.p.animador.extra.munecaD ??= [0, 0, 0]);
+    ex[2] = tras > 0 ? Math.sin(tras * 11) * 0.1 * Math.exp(-tras * 0.6) : 0;
+  }
+
+  // Cartel sobre la mano izquierda, de frente al jugador; la palma de la mano de seÃ±as tambiÃ©n lo mira
+  posicionarCartel() {
+    const ojos = this.camara.posicionOjos(this._o);
+    this.p.orientarPalma('brazoD', ojos);
+    if (!this.cartel.visible) return;
+    this.p.rig.brazoI.muneca.getWorldPosition(this._w);
+    const haciaJugador = Math.atan2(ojos.x - this._w.x, ojos.z - this._w.z);
+    this._w.y += 0.17;
+    this._w.x += Math.sin(haciaJugador) * 0.1; // un poco hacia el jugador, para que nada lo tape
+    this._w.z += Math.cos(haciaJugador) * 0.1;
+    this.cartel.position.copy(this.p.raiz.worldToLocal(this._w));
+    this.cartel.lookAt(ojos);
+  }
+
+  mirarAlJugador(activo) {
+    const ex = (this.p.animador.extra.cabeza ??= [0, 0, 0]);
+    const tor = (this.p.animador.extra.torso ??= [0, 0, 0]);
+    if (!activo) {
+      ex[1] = 0;
+      tor[1] = 0;
+      return;
+    }
+    // Ãngulo hacia el jugador (los personajes miran a -Z; y positivo = gira a su izquierda)
+    const ojos = this.camara.posicionOjos(this._v);
+    const pos = this.p.raiz.position;
+    const ang = Math.atan2(-(ojos.x - pos.x), -(ojos.z - pos.z));
+    // Se da vuelta casi de frente al jugador: asÃ­ el cartel y la mano de seÃ±as quedan de cara
+    tor[1] = THREE.MathUtils.clamp(ang * 0.8, -1.1, 1.1);
+    ex[1] = THREE.MathUtils.clamp(ang * 0.3, -1, 1);
+  }
+
+  volverAEscribir(espera) {
+    this.fase = 'espera';
+    this.timer = espera ?? azar(this.b.intervaloMin, this.b.intervaloMax);
+    this.cartel.visible = false;
+    this.revelar = null;
+    if (this.p.animador.extra.munecaD) this.p.animador.extra.munecaD[2] = 0;
+    this.p.mostrarDedos(0);
+    this.p.escalarMano('brazoD', 1);
+    this.p.orientarPalma('brazoD', null);
+    this.p.animador.pose('escribir', 5);
+    this.p.animador.capa('golpear', 0);
+    this.mirarAlJugador(false);
+    estado.accion.mirandoSenia = false;
+    this.hud.setLectura(null);
+  }
+
+  empezarGolpes() {
+    this.fase = 'golpes';
+    this.golpesDados = 0;
+    this.timer = 0.15;
+    this.p.animador.pose('golpear', 7);
+    this.p.animador.capa('golpear', 1);
+  }
+
+  empezarSenia() {
+    const m = this.examen.datos.machete;
+    const pedidosPosibles = m.paraAmigos.filter((i) => !this.yaPedidas.has(i));
+    const pasesPosibles = m.seniasPasan.filter((i) => !this.yaPasadas.has(i));
+    let tipo = Math.random() < this.b.probPedido ? 'pedido' : 'respuesta';
+    if (tipo === 'pedido' && !pedidosPosibles.length) tipo = 'respuesta';
+    if (tipo === 'respuesta' && !pasesPosibles.length) tipo = pedidosPosibles.length ? 'pedido' : 'respuesta';
+    const pregunta = tipo === 'pedido'
+      ? elegir(pedidosPosibles)
+      : elegir(pasesPosibles.length ? pasesPosibles : m.seniasPasan);
+    const opcion = this.examen.preguntas[pregunta].correcta;
+    this.senia = { tipo, pregunta, opcion };
+
+    this.fase = 'senia';
+    this.timer = this.b.duracionSenia;
+    this.lectura = 0;
+    this.p.animador.capa('golpear', 0);
+    this.p.animador.pose(tipo === 'pedido' ? 'seniaPedido' : 'seniaCartel', 6);
+    // Los dedos no aparecen de golpe: sube el puÃ±o, se abren de a uno hasta el nÃºmero y la mano "late"
+    this.revelar = tipo === 'pedido' ? null : { n: opcion + 1, t: 0 };
+    this.mostrarDedosSenia(0);
+    this.p.escalarMano('brazoD', ESCALA_MANO_SENIA);
+    this.dibujarCartel(tipo === 'pedido' ? `Â¿${pregunta + 1}?` : `${pregunta + 1}`);
+    this.cartel.visible = true;
+    this.mirarAlJugador(true);
+    bus.emit('seniaInicio', { tipo });
+  }
+
+  seniaLeida() {
+    const s = this.senia;
+    estado.registro.seniasLeidas += 1;
+    if (s.tipo === 'respuesta') {
+      this.yaPasadas.add(s.pregunta);
+      estado.sabe.add(s.pregunta);
+      participar(this.puntos, { intercambio: true });
+      this.hud.mensaje(`${this.nombre} te pasa: Â«la ${s.pregunta + 1} es la ${LETRAS[s.opcion]}Â» (${s.opcion + 1} dedo${s.opcion ? 's' : ''})`, 6);
+      bus.emit('seniaLeida', s);
+      // Termina la seÃ±a enseguida
+      this.timer = Math.min(this.timer, 0.8);
+    } else {
+      this.hud.mensaje(`${this.nombre} te pregunta: Â«Â¿quÃ© va en la ${s.pregunta + 1}?Â» â€” mirala y mostrale los dedos (1â€“4 = Aâ€“D)`, 6);
+      this.fase = 'respuesta';
+      this.timer = this.b.ventanaRespuesta;
+      bus.emit('seniaLeida', s);
+    }
+  }
+
+  responder(n) {
+    const s = this.senia;
+    this.yaPedidas.add(s.pregunta);
+    estado.accion.mostrandoDedos = n + 1;
+    this.dedosTimer = 1.6;
+    estado.registro.seniasRespondidas += 1;
+    participar(this.puntos, { intercambio: true });
+    const bien = n === s.opcion;
+    this.hud.mensaje(`Le mostrÃ¡s ${n + 1} dedo${n ? 's' : ''} a ${this.nombre}: Â«la ${s.pregunta + 1} es la ${LETRAS[n]}Â»`, 4);
+    bus.emit('seniaRespondida', { ...s, respuesta: n, bien });
+    // Ella asiente y vuelve a su hoja
+    this.p.animador.capa('asentir', 1);
+    setTimeout(() => this.p.animador.capa('asentir', 0), 900);
+    this.volverAEscribir();
+  }
+
+  update(dt) {
+    if (this.fase === 'senia' || this.fase === 'respuesta') {
+      this.posicionarCartel();
+      this.animarSenia(dt);
+    }
+    // Dedos del jugador: se bajan solos despuÃ©s de un rato
+    if (this.dedosTimer > 0) {
+      this.dedosTimer -= dt;
+      if (this.dedosTimer <= 0) estado.accion.mostrandoDedos = 0;
+    }
+    if (estado.final) return;
+
+    // Con el machete guardado (Camino 2) el grupo deja de pedirle cosas
+    if (estado.grupoEnojado && this.fase !== 'espera') this.volverAEscribir(9999);
+
+    // Si la profesora se da vuelta o se acerca, disimula
+    const enCurso = this.fase === 'golpes' || this.fase === 'senia' || this.fase === 'respuesta';
+    if (enCurso && (this.ia.estado !== 'patrulla' || this.ia.mirandoHacia(this.p.raiz.position, 35))) {
+      // (no cuenta como ignorada: no es culpa del jugador)
+      this.volverAEscribir(azar(8, 14));
+      this.p.animador.pose('disimular', 10);
+      setTimeout(() => this.fase === 'espera' && this.p.animador.pose('escribir', 4), 3500);
+      return;
+    }
+
+    this.timer -= dt;
+    switch (this.fase) {
+      case 'espera':
+        if (this.timer <= 0 && !estado.grupoEnojado) {
+          if (this.oportunidad()) this.empezarGolpes();
+          else this.timer = 1.5;
+        }
+        break;
+      case 'golpes':
+        if (this.timer <= 0) {
+          if (this.golpesDados < 3) {
+            this.golpesDados += 1;
+            this.timer = this.b.separacionGolpes;
+            const posicion = this.p.raiz.position.clone().setY(0.8);
+            const intensidad = this.b.intensidadGolpe + 0.2 * (this.ia.escalada ?? 0);
+            bus.emit('golpeLapicera', { posicion, numero: this.golpesDados });
+            bus.emit('ruido', { posicion, intensidad, tipo: 'lapicera' });
+            this.hud.indicar({ tipo: 'lapicera', posicion, etiqueta: 'toc toc', icono: 'âœŽ', duracion: 2.2 });
+            if (this.golpesDados === 1) this.hud.subtitulo(`[Toc, toc, toc: ${this.nombre} golpea la lapicera ${this.hud.direccionTexto(posicion)}]`, 3);
+          } else {
+            this.empezarSenia();
+          }
+        }
+        break;
+      case 'senia': {
+        const mirando = !estado.accion.modoHoja && this.mirandoAElla();
+        estado.accion.mirandoSenia = mirando;
+        if (mirando && this.lectura < 1) {
+          const panico = estado.panico ?? 0;
+          const ritmo = panico > this.b.panicoIlegible ? 0.08 : 1 - panico * 0.6;
+          this.lectura = Math.min(1, this.lectura + (dt / this.b.tiempoLectura) * ritmo);
+          this.hud.setLectura(this.lectura, panico > this.b.panicoIlegible ? 'La seÃ±a se ve borrosaâ€¦' : `Leyendo la seÃ±a de ${this.nombre}`);
+          if (this.lectura >= 1) this.seniaLeida();
+        } else if (this.lectura < 1) {
+          this.hud.setLectura(null);
+        }
+        if (this.timer <= 0 && this.fase === 'senia') {
+          if (this.lectura < 1) {
+            estado.registro.ignorados += 1;
+            bus.emit('seniaIgnorada');
+          }
+          this.volverAEscribir();
+        }
+        break;
+      }
+      case 'respuesta':
+        estado.accion.mirandoSenia = !estado.accion.modoHoja && this.mirandoAElla();
+        this.hud.setLectura(null);
+        if (this.timer <= 0) {
+          estado.registro.ignorados += 1;
+          bus.emit('seniaIgnorada');
+          this.p.animador.pose('reclamo', 6);
+          this.p.animador.capa('reclamo', 1);
+          setTimeout(() => this.p.animador.capa('reclamo', 0), 1500);
+          this.hud.subtitulo(`[${this.nombre} te hace un gesto de reclamo]`);
+          this.volverAEscribir();
+          this.p.animador.pose('reclamo', 6);
+          setTimeout(() => this.p.animador.pose('escribir', 4), 1500);
+        }
+        break;
+    }
+  }
+}
+import { crearPersonaje } from './Personaje.js';
+import { PERSONAJES, UBICACIONES, BANCOS_VACIOS, configRelleno } from './config.js';
+import { aleatorioConSemilla } from '../world/materiales.js';
+
+/**
+ * Ubica a todos los personajes en el aula.
+ * Devuelve { protagonista, profesora, senias, mensajero, grupo, aplicado, relleno[], todos[] }.
+ */
+export function crearElenco(aula, scene) {
+  const rnd = aleatorioConSemilla(42);
+  const elenco = { relleno: [], todos: [] };
+
+  const sentar = (personaje, banco) => {
+    personaje.raiz.position.copy(banco.asiento);
+    personaje.banco = banco;
+    scene.add(personaje.raiz);
+    elenco.todos.push(personaje);
+    return personaje;
+  };
+
+  // Amigos y compaÃ±ero aplicado
+  const ocupados = new Set();
+  for (const [clave, ub] of Object.entries(UBICACIONES)) {
+    const banco = aula.buscarBanco(ub.col, ub.fila);
+    elenco[clave] = sentar(crearPersonaje(PERSONAJES[clave], clave), banco);
+    ocupados.add(banco);
+  }
+
+  // Protagonista en el banco central
+  elenco.protagonista = sentar(crearPersonaje(PERSONAJES.protagonista, 'protagonista'), aula.bancoCentral);
+  ocupados.add(aula.bancoCentral);
+
+  for (const v of BANCOS_VACIOS) ocupados.add(aula.buscarBanco(v.col, v.fila));
+
+  // Relleno en el resto de los bancos
+  for (const banco of aula.bancos) {
+    if (ocupados.has(banco)) continue;
+    const p = sentar(crearPersonaje(configRelleno(rnd), 'relleno'), banco);
+    p.animador.poseInicial('escribirFondo');
+    p.animador.capa('escribir', 0.4 + rnd() * 0.6);
+    elenco.relleno.push(p);
+  }
+
+  // Poses iniciales
+  elenco.aplicado.animador.poseInicial('escribir');
+  elenco.aplicado.animador.capa('escribir', 1);
+  elenco.senias.mostrarLapicera(true);
+  elenco.senias.animador.poseInicial('escribir');
+  elenco.mensajero.animador.poseInicial('sentado');
+  elenco.grupo.animador.poseInicial('escribir');
+  elenco.grupo.animador.capa('escribir', 0.5);
+
+  // Profesora: parada al frente, de cara a los alumnos (los personajes miran a -Z)
+  const profesora = crearPersonaje(PERSONAJES.profesora, 'profesora');
+  profesora.raiz.position.set(0.8, 0, aula.limites.zMin + 1.3);
+  profesora.raiz.rotation.y = Math.PI;
+  profesora.animador.poseInicial('manosAtras');
+  scene.add(profesora.raiz);
+  elenco.profesora = profesora;
+  elenco.todos.push(profesora);
+
+  elenco.update = (dt, t) => {
+    for (const p of elenco.todos) p.update(dt, t);
+  };
+
+  return elenco;
+}
+{
+  "camara": {
+    "fov": 60,
+    "cerca": 0.03,
+    "lejos": 60,
+    "giroHorizontalMax": 110,
+    "giroVerticalMin": -65,
+    "giroVerticalMax": 35,
+    "sensibilidad": 0.0022,
+    "alturaCuello": 1.14,
+    "offsetOjosY": 0.14,
+    "offsetOjosZ": -0.07
+  },
+  "aula": {
+    "columnas": 5,
+    "filas": 5,
+    "separacionColumnas": 2.2,
+    "separacionFilas": 1.5,
+    "anchoAula": 12,
+    "frenteZ": -7.5,
+    "fondoZ": 5.2,
+    "altoAula": 3.4,
+    "offsetSillaZ": 0.45,
+    "alturaBanco": 0.76,
+    "pasillosX": [
+      -5.3,
+      -3.3,
+      -1.1,
+      1.1,
+      3.3,
+      5.3
+    ],
+    "pasilloFrenteZ": -4.3,
+    "pasilloFondoZ": 4.4,
+    "puntoPizarron": [
+      1.2,
+      -6.3
+    ],
+    "puntoEscritorio": [
+      -0.5,
+      -6.3
+    ]
+  },
+  "profesora": {
+    "velocidadPatrulla": 0.85,
+    "velocidadSospecha": 1.15,
+    "velocidadDescubrimiento": 1.3,
+    "velocidadGiro": 5,
+    "distanciaPaso": 0.62,
+    "locomocion": {
+      "aceleracion": 1.6,
+      "frenado": 2.2,
+      "radioEsquina": 0.35,
+      "suavizadoDireccion": 7
+    },
+    "patrulla": [
+      {
+        "x": 1.2,
+        "z": -6.3,
+        "pausa": 7,
+        "mirar": "pizarron"
+      },
+      {
+        "x": 3.3,
+        "z": -4.3,
+        "pausa": 0
+      },
+      {
+        "x": 3.3,
+        "z": 4.4,
+        "pausa": 0
+      },
+      {
+        "x": -3.3,
+        "z": 4.4,
+        "pausa": 3,
+        "mirar": "alumnos"
+      },
+      {
+        "x": -3.3,
+        "z": -4.3,
+        "pausa": 0
+      },
+      {
+        "x": -0.5,
+        "z": -6.3,
+        "pausa": 6,
+        "mirar": "alumnos"
+      }
+    ],
+    "vision": {
+      "anguloTotal": 70,
+      "distancia": 7.5,
+      "intervalo": 0.1,
+      "atenuacionDistancia": 0.65
+    },
+    "escucha": {
+      "radio": 14,
+      "umbral": 0.25
+    },
+    "sospecha": {
+      "porSegundoViendoTrampa": 30,
+      "porRuido": 22,
+      "decaimiento": 2.5,
+      "decaimientoTrasInspeccion": 6,
+      "maxSinFlagrancia": 99,
+      "umbralInspeccionJugador": 60
+    },
+    "estados": {
+      "duracionSospechaMin": 12,
+      "duracionSospechaMax": 20,
+      "duracionInspeccionMin": 3,
+      "duracionInspeccionMax": 5,
+      "probSospechaEspontaneaBase": 0.004,
+      "probSospechaEspontaneaEscalada": 0.03,
+      "probInspeccion": 0.35,
+      "radioDeambularMax": 5.5,
+      "radioDeambularMin": 1.8,
+      "pausaDeambular": 1.5
+    },
+    "escalada": {
+      "duracionReferencia": 480,
+      "pesoIntercambio": 0.08,
+      "umbralActo3": 0.4
+    }
+  },
+  "examen": {
+    "duracion": 480,
+    "segundosParaDestello": 6,
+    "segundosParaRecuerdo": 10,
+    "notaAprobacion": 6,
+    "notaMaxima": 10
+  },
+  "hoja": {
+    "velocidadTransicion": 7,
+    "pitch": -1.05,
+    "sensibilidadCursor": 1.0
+  },
+  "hud": {
+    "radioIndicadorPasos": 4.5,
+    "duracionIndicador": 1.4,
+    "segundosAvisoTiempo": 60
+  },
+  "machete": {
+    "escondites": {
+      "cartuchera": {
+        "apertura": 1.0,
+        "legibilidad": 0.85,
+        "factorSospecha": 1.0,
+        "ruido": 0
+      },
+      "manga": {
+        "apertura": 0.25,
+        "legibilidad": 0.7,
+        "factorSospecha": 1.7,
+        "ruido": 0
+      },
+      "celular": {
+        "apertura": 0.5,
+        "legibilidad": 1.0,
+        "factorSospecha": 2.6,
+        "ruido": 0.12
+      }
+    },
+    "tiempoConsulta": 1.0,
+    "desenfoquePanicoPx": 5
+  },
+  "senias": {
+    "esperaInicial": 15,
+    "intervaloMin": 22,
+    "intervaloMax": 38,
+    "separacionGolpes": 0.32,
+    "intensidadGolpe": 0.12,
+    "duracionSenia": 7,
+    "ventanaRespuesta": 9,
+    "tiempoLectura": 1.0,
+    "toleranciaMirada": 24,
+    "probPedido": 0.45,
+    "distanciaProfeSegura": 6,
+    "panicoIlegible": 0.75
+  },
+  "papelitos": {
+    "esperaInicial": 30,
+    "intervaloMin": 35,
+    "intervaloMax": 55,
+    "tiempoAviso": 1.8,
+    "intensidadAviso": 0.14,
+    "tiempoVuelo": 1.15,
+    "errorLanzamiento": 0.12,
+    "gravedad": 9.8,
+    "radio": 0.035,
+    "rebote": 0.35,
+    "friccion": 2.5,
+    "radioAtrape": 0.85,
+    "ruidoCaida": 0.6,
+    "ruidoFallo": 1.0,
+    "sospechaPorFallo": 25,
+    "tiempoAbrir": 1.4,
+    "tiempoLimiteRespuesta": 40,
+    "radioExito": 0.9,
+    "vidaEnPiso": 12
+  },
+  "lanzamiento": {
+    "tiempoCarga": 1.1,
+    "velocidadMin": 3.5,
+    "velocidadMax": 10,
+    "anguloElevacion": 0.35,
+    "factorGiroBrazo": 1.18,
+    "temblorMax": 0.12,
+    "puntosArco": 48
+  },
+  "compromiso": {
+    "porSenia": 1,
+    "porPapelito": 1.5,
+    "porSegundoMachete": 0.05
+  },
+  "panico": {
+    "radio": 3.4,
+    "base": 0.35,
+    "velocidadSubida": 0.9,
+    "velocidadBajada": 0.3,
+    "velocidadBajadaHoja": 5,
+    "vibracionMax": 1.0
+  },
+  "efectos": {
+    "desenfoqueMaxPx": 9,
+    "vinetaBase": 0.22,
+    "tensionPorSospecha": 0.5
+  },
+  "audio": {
+    "volumenAmbiente": 0.15,
+    "volumenLatidoMax": 0.9,
+    "volumenRespiracionMax": 0.55,
+    "duckingPanico": 0.85,
+    "duckingHoja": 0.6,
+    "refDistancia": 1.5,
+    "rolloff": 1.4,
+    "volumenEscritura": 0.6,
+    "volumenPasos": 1.5,
+    "volumenSusurro": 0.6,
+    "volumenVozProfe": 1.0
+  },
+  "finales": {
+    "umbralCompromiso": 6,
+    "segundosIgnorandoParaMerito": 110,
+    "ignoradosMinimos": 2,
+    "demoraPasoProfesoraMerito": 5,
+    "desvioFalloFinal": 0.55,
+    "factorVelocidadFalloFinal": 0.55
+  },
+  "grupo": {
+    "intervaloMin": 25,
+    "intervaloMax": 45,
+    "duracionReclamo": 2.6
+  }
+}

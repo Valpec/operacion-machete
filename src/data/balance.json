@@ -183,6 +183,8 @@
     "esperaInicial": 30,
     "intervaloMin": 35,
     "intervaloMax": 55,
+    "tiempoAviso": 1.8,
+    "intensidadAviso": 0.14,
     "tiempoVuelo": 1.15,
     "errorLanzamiento": 0.12,
     "gravedad": 9.8,

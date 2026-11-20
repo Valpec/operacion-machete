@@ -1,0 +1,816 @@
+﻿=== src/systems/BrazosJugador.js ===
+import { estado } from '../core/GameState.js';
+
+/**
+ * Decide la pose de los brazos del protagonista segÃºn lo que estÃ© haciendo,
+ * con prioridades (la hoja manda sobre todo, despuÃ©s lanzar, mostrar dedos, machete...).
+ */
+export class BrazosJugador {
+  constructor(protagonista) {
+    this.p = protagonista;
+    this.poseActual = null;
+    this.lanzando = 0; // segundos que dura el gesto de soltar el papelito
+    this.papelEnMano = null; // malla del papelito pegada a la mano
+    this.papelAbierto = null; // malla del papelito desplegado al abrirlo
+  }
+
+  gestoLanzar() {
+    this.lanzando = 0.35;
+  }
+
+  update(dt) {
+    const a = estado.accion;
+    this.lanzando = Math.max(0, this.lanzando - dt);
+    let pose = 'manosEnBanco';
+    let escribir = 0;
+    if (a.modoHoja) {
+      escribir = 0.6;
+    } else if (this.lanzando > 0) pose = 'jugLanzar';
+    else if (a.apuntando) pose = 'jugApuntar';
+    else if (a.mostrandoDedos > 0) pose = 'jugDedos';
+    else if (a.abriendoPapel) pose = 'jugAbrirPapel';
+    else if (a.machete) pose = 'jugMachete';
+
+    if (pose !== this.poseActual) {
+      this.p.animador.pose(pose, pose === 'jugLanzar' ? 18 : 9);
+      this.poseActual = pose;
+    }
+    this.p.animador.capa('escribir', escribir);
+    this.p.mostrarDedos(a.modoHoja ? 0 : a.mostrandoDedos);
+
+    // Mientras escribe/apoya la mano en el banco, el papelito queda escondido debajo de la mano;
+    // se ve claramente cuando levanta la mano para apuntar y lanzarlo.
+    if (this.papelEnMano) this.papelEnMano.visible = !!estado.papelEnMano && a.apuntando && !a.modoHoja;
+    if (this.papelAbierto) this.papelAbierto.visible = !!a.abriendoPapel && !a.modoHoja;
+  }
+}
+=== src/characters/Manos.js ===
+import * as THREE from 'three';
+
+/**
+ * Manos con dedos articulados para los modelos con auto-rig.
+ *
+ * Los GLB traen la mano como un bloque: cuatro dedos rectos y un pulgar, todo pegado a un solo
+ * hueso. AcÃ¡ se detectan los dedos en la malla y se arma, por mano, un esqueleto de
+ *   pulgar (3 huesos) + Ã­ndice, medio, anular y meÃ±ique (3 huesos cada uno)
+ * colgado del hueso "mano". Con eso la mano puede quedar relajada, hacer puÃ±o, seÃ±alar,
+ * agarrar una lapicera o mostrar de 1 a 4 dedos (las seÃ±as de Sofi) sin manos "postizas".
+ *
+ * ConvenciÃ³n (igual que el resto del rig): los huesos de los dedos nacen con la orientaciÃ³n
+ * del antebrazo; el eje Z local es el eje de flexiÃ³n (los dedos se cierran hacia la palma).
+ */
+
+export const DEDOS = ['pulgar', 'indice', 'medio', 'anular', 'menique'];
+
+const _a = new THREE.Vector3();
+const _b = new THREE.Vector3();
+const _c = new THREE.Vector3();
+
+// ---------- DetecciÃ³n ----------
+
+/**
+ * Detecta los dedos de UNA mano en la geometrÃ­a normalizada (mirando a -Z, pose A).
+ * Devuelve null si la mano no tiene la forma esperada (en ese caso se usa el modo viejo).
+ *   art  articulaciones de detectarArticulaciones()
+ *   lado 'I' | 'D'
+ * Resultado: { dedos: [{ nombre, puntos:[p0,p1,p2,p3] }], eje, largo }
+ *   p0 = nudillo (base del dedo), p3 = punta; p1 y p2 son las articulaciones intermedias.
+ */
+export function detectarDedos(pos, art, lado, H, diag = []) {
+  const signo = lado === 'I' ? -1 : 1;
+  const mu = art['muneca' + lado];
+  const pu = art['punta' + lado];
+  const hombro = art['hombro' + lado];
+  const u = new THREE.Vector3().subVectors(pu, mu);
+  const L = u.length();
+  if (L < H * 0.05) return diag.push('mano demasiado corta'), null;
+  u.normalize();
+
+  // VÃ©rtices de la mano: pasada la muÃ±eca, cerca del eje y del lado correcto
+  const xMin = Math.abs(hombro.x) * 0.55;
+  const mano = [];
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    if (x * signo < xMin) continue;
+    _a.fromBufferAttribute(pos, i).sub(mu);
+    const t = _a.dot(u);
+    if (t < 0.05 * L || t > 1.08 * L) continue;
+    const radial = _b.copy(_a).addScaledVector(u, -t).length();
+    if (radial > 0.62 * L) continue;
+    mano.push({ i, t: t / L, c: _a.z, p: new THREE.Vector3().fromBufferAttribute(pos, i) });
+  }
+  if (mano.length < 60) return diag.push(`pocos vÃ©rtices de mano (${mano.length})`), null;
+
+  // Puntas de los cuatro dedos largos: k-means (k = 4) sobre la coordenada transversal (z)
+  // de los vÃ©rtices de la franja distal. El pulgar no llega hasta ahÃ­.
+  const distal = mano.filter((q) => q.t > 0.74);
+  if (distal.length < 20) return diag.push(`pocos vÃ©rtices en la franja de puntas (${distal.length})`), null;
+  const cs = distal.map((q) => q.c).sort((x, y) => x - y);
+  let centros = [0.125, 0.375, 0.625, 0.875].map((f) => cs[Math.floor(f * (cs.length - 1))]);
+  let grupo = new Array(distal.length).fill(0);
+  for (let it = 0; it < 25; it++) {
+    distal.forEach((q, n) => {
+      let mejor = 0;
+      for (let k = 1; k < 4; k++) if (Math.abs(q.c - centros[k]) < Math.abs(q.c - centros[mejor])) mejor = k;
+      grupo[n] = mejor;
+    });
+    const suma = [0, 0, 0, 0];
+    const cant = [0, 0, 0, 0];
+    distal.forEach((q, n) => {
+      suma[grupo[n]] += q.c;
+      cant[grupo[n]]++;
+    });
+    for (let k = 0; k < 4; k++) if (cant[k]) centros[k] = suma[k] / cant[k];
+  }
+  // Ordenados de adelante (-z, junto al pulgar) hacia atrÃ¡s: Ã­ndice, medio, anular, meÃ±ique
+  const orden = [0, 1, 2, 3].sort((x, y) => centros[x] - centros[y]);
+  const largos = [0.4, 0.43, 0.4, 0.33]; // largo de cada dedo respecto del largo de la mano
+
+  const dedos = [];
+  const puntaDe = (miembros) => {
+    // punta = promedio de los vÃ©rtices mÃ¡s lejanos del grupo
+    const ord = [...miembros].sort((q1, q2) => q2.t - q1.t);
+    const n = Math.max(3, Math.min(8, Math.floor(ord.length * 0.15)));
+    const p = new THREE.Vector3();
+    for (let k = 0; k < n; k++) p.add(ord[k].p);
+    return p.multiplyScalar(1 / n);
+  };
+  for (let f = 0; f < 4; f++) {
+    const miembros = distal.filter((_, n) => grupo[n] === orden[f]);
+    if (miembros.length < 3) return diag.push(`dedo ${f + 1} sin vÃ©rtices`), null;
+    const punta = puntaDe(miembros);
+    const largo = Math.max(L * 0.28, Math.min(L * 0.6, punta.distanceTo(mu) * largos[f]));
+    const dir = _c.subVectors(punta, mu).normalize();
+    const base = punta.clone().addScaledVector(dir, -largo);
+    const j1 = base.clone().lerp(punta, 0.4);
+    const j2 = base.clone().lerp(punta, 0.72);
+    dedos.push({ nombre: DEDOS[f + 1], puntos: [base, j1, j2, punta.clone()] });
+  }
+
+  // Pulgar: vÃ©rtices adelante (-z) del eje del Ã­ndice, sin llegar a la franja de las puntas
+  const indice = dedos[0];
+  const tIndice = _a.subVectors(indice.puntos[3], mu).dot(u) / L;
+  const cIndice = indice.puntos[3].z - mu.z;
+  const anchoDedo = Math.abs(centros[orden[1]] - centros[orden[0]]) || L * 0.12;
+  const pulgarPts = mano.filter((q) => q.t < 0.8 && q.c < cIndice * (q.t / Math.max(0.3, tIndice)) - anchoDedo * 0.6);
+  if (pulgarPts.length < 15) return diag.push(`pulgar sin vÃ©rtices (${pulgarPts.length})`), null;
+  // La punta del pulgar: el extremo mÃ¡s adelantado (-z) y largo del conjunto
+  const ranking = pulgarPts
+    .filter((q) => q.t > 0.3)
+    .map((q) => ({ q, v: -q.c / L + 0.35 * q.t }))
+    .sort((x, y) => y.v - x.v);
+  if (ranking.length < 6) return diag.push('pulgar sin punta'), null;
+  const punta = new THREE.Vector3();
+  for (let k = 0; k < 6; k++) punta.add(ranking[k].q.p);
+  punta.multiplyScalar(1 / 6);
+  const tp = punta.clone();
+  const baseP = mu.clone().lerp(tp, 0.3);
+  dedos.unshift({
+    nombre: 'pulgar',
+    puntos: [baseP, baseP.clone().lerp(tp, 0.42), baseP.clone().lerp(tp, 0.74), tp],
+  });
+
+  return { dedos, eje: u, largo: L, mano };
+}
+
+// ---------- Esqueleto ----------
+
+/** Crea los huesos de los dedos de una mano. Devuelve { pulgar: [h1,h2,h3], indice: [...], ... }. */
+export function crearHuesosDedos(manoHueso, deteccion, lado) {
+  const huesos = {};
+  manoHueso.updateMatrixWorld(true);
+  for (const d of deteccion.dedos) {
+    const cadena = [];
+    let padre = manoHueso;
+    for (let k = 0; k < 3; k++) {
+      const b = new THREE.Bone();
+      b.name = `${d.nombre}${k + 1}${lado}`;
+      padre.add(b);
+      padre.updateMatrixWorld(true);
+      b.position.copy(padre.worldToLocal(d.puntos[k].clone()));
+      b.updateMatrixWorld(true);
+      cadena.push(b);
+      padre = b;
+    }
+    huesos[d.nombre] = cadena;
+  }
+  return huesos;
+}
+
+// ---------- Pesos ----------
+
+function distSeg(p, a, b, salida) {
+  const ab = _b.subVectors(b, a);
+  const t = THREE.MathUtils.clamp(_a.subVectors(p, a).dot(ab) / Math.max(1e-9, ab.lengthSq()), 0, 1);
+  const q = _c.copy(a).addScaledVector(ab, t);
+  if (salida) salida.t = t;
+  return p.distanceTo(q);
+}
+
+const suave = (x) => {
+  const t = THREE.MathUtils.clamp(x, 0, 1);
+  return t * t * (3 - 2 * t);
+};
+
+/**
+ * Sobrescribe los pesos de piel de los vÃ©rtices de los dedos.
+ *   deteccion   resultado de detectarDedos()
+ *   huesosDedos resultado de crearHuesosDedos()
+ *   indiceHueso (hueso) => Ã­ndice en el esqueleto
+ *   manoHueso   hueso "mano" (para la uniÃ³n con la palma)
+ */
+export function pesosDedos(g, deteccion, huesosDedos, indiceHueso, manoHueso, L) {
+  const pos = g.attributes.position;
+  const idx = g.attributes.skinIndex;
+  const pes = g.attributes.skinWeight;
+  const p = new THREE.Vector3();
+  const aux = { t: 0 };
+  const manoIdx = indiceHueso(manoHueso);
+  const radio = L * 0.2; // ancho mÃ¡ximo de un dedo (desde su eje)
+  let tocados = 0;
+  for (const q of deteccion.mano) {
+    p.fromBufferAttribute(pos, q.i);
+    // dedo mÃ¡s cercano (distancia al segmento nudillo-punta, normalizada por el grosor)
+    let mejor = null;
+    let mejorD = Infinity;
+    for (const d of deteccion.dedos) {
+      const grosor = d.nombre === 'pulgar' ? radio * 1.25 : radio * 0.8;
+      const dist = distSeg(p, d.puntos[0], d.puntos[3], aux) / grosor;
+      if (dist < mejorD) {
+        mejorD = dist;
+        mejor = { d, s: aux.t };
+      }
+    }
+    if (!mejor || mejorD > 1.15) continue;
+    // s: 0 en el nudillo, 1 en la punta. Para vÃ©rtices antes del nudillo no hay proyecciÃ³n
+    // negativa (clamp), asÃ­ que se mira tambiÃ©n la posiciÃ³n a lo largo del eje de la mano.
+    const d = mejor.d;
+    const cadena = huesosDedos[d.nombre];
+    const ab = _b.subVectors(d.puntos[3], d.puntos[0]);
+    const sReal = _a.subVectors(p, d.puntos[0]).dot(ab) / Math.max(1e-9, ab.lengthSq());
+    const w1 = 1 - suave((sReal - 0.4 + 0.1) / 0.2); // falange proximal
+    const w3 = suave((sReal - 0.72 + 0.1) / 0.2); // falange distal
+    let wProx = w1;
+    let wDist = w3;
+    let wMed = Math.max(0, 1 - wProx - wDist);
+    // uniÃ³n con la palma: antes y alrededor del nudillo se mezcla con la mano
+    const wPalma = 1 - suave((sReal + 0.1) / 0.28);
+    const resto = 1 - wPalma;
+    wProx *= resto;
+    wMed *= resto;
+    wDist *= resto;
+    const lista = [
+      [manoIdx, wPalma],
+      [indiceHueso(cadena[0]), wProx],
+      [indiceHueso(cadena[1]), wMed],
+      [indiceHueso(cadena[2]), wDist],
+    ];
+    let total = 0;
+    for (const [, w] of lista) total += w;
+    if (total < 1e-6) continue;
+    for (let k = 0; k < 4; k++) {
+      idx.setComponent(q.i, k, lista[k][0]);
+      pes.setComponent(q.i, k, lista[k][1] / total);
+    }
+    tocados++;
+  }
+  return tocados;
+}
+
+// ---------- Poses de mano ----------
+// Cada pose da, por dedo, la flexiÃ³n de las tres falanges [prox, medial, distal] en radianes
+// (positivo = hacia la palma) y la apertura lateral del dedo ("abrir", en radianes).
+
+const reposo = {
+  pulgar: { f: [0.18, 0.25, 0.2], abrir: 0.0, cruzar: 0.2 },
+  indice: { f: [0.22, 0.34, 0.2], abrir: -0.03 },
+  medio: { f: [0.3, 0.42, 0.24], abrir: 0.0 },
+  anular: { f: [0.38, 0.48, 0.28], abrir: 0.03 },
+  menique: { f: [0.46, 0.52, 0.3], abrir: 0.07 },
+};
+const puno = {
+  pulgar: { f: [0.35, 0.5, 0.45], abrir: 0.0, cruzar: 0.75 },
+  indice: { f: [1.35, 1.55, 1.0], abrir: 0 },
+  medio: { f: [1.4, 1.6, 1.0], abrir: 0 },
+  anular: { f: [1.45, 1.6, 1.0], abrir: 0 },
+  menique: { f: [1.5, 1.6, 1.0], abrir: 0 },
+};
+const recta = (abrir = 0.08) => ({
+  pulgar: { f: [0.05, 0.05, 0.05], abrir: 0.35, cruzar: 0.0 },
+  indice: { f: [0.02, 0.02, 0.02], abrir: -abrir },
+  medio: { f: [0.02, 0.02, 0.02], abrir: -abrir * 0.25 },
+  anular: { f: [0.02, 0.02, 0.02], abrir: abrir * 0.5 },
+  menique: { f: [0.02, 0.02, 0.02], abrir: abrir * 1.4 },
+});
+
+export const POSES_MANO = {
+  reposo,
+  puno,
+  abierta: recta(0.12),
+  plana: {
+    ...recta(0.04),
+    pulgar: { f: [0.08, 0.1, 0.08], abrir: 0.15, cruzar: 0.1 },
+  },
+  // SeÃ±alar: Ã­ndice estirado, el resto cerrado
+  senalar: {
+    ...puno,
+    indice: { f: [0.02, 0.03, 0.02], abrir: -0.02 },
+    pulgar: { f: [0.2, 0.3, 0.25], abrir: 0.1, cruzar: 0.5 },
+  },
+  // Agarrar la lapicera: pinza entre pulgar e Ã­ndice, el resto recogido
+  lapicera: {
+    pulgar: { f: [0.35, 0.45, 0.3], abrir: -0.05, cruzar: 0.75 },
+    indice: { f: [0.55, 0.7, 0.35], abrir: 0.0 },
+    medio: { f: [0.95, 1.05, 0.6], abrir: 0.02 },
+    anular: { f: [1.15, 1.25, 0.75], abrir: 0.04 },
+    menique: { f: [1.25, 1.3, 0.8], abrir: 0.07 },
+  },
+  // Sostener un papelito: pinza mÃ¡s cerrada
+  pinza: {
+    pulgar: { f: [0.22, 0.28, 0.2], abrir: 0.12, cruzar: 0.45 },
+    indice: { f: [0.42, 0.48, 0.25], abrir: -0.02 },
+    medio: { f: [0.52, 0.62, 0.35], abrir: 0.01 },
+    anular: { f: [0.62, 0.72, 0.42], abrir: 0.03 },
+    menique: { f: [0.72, 0.8, 0.48], abrir: 0.06 },
+  },
+  // Mano que espera atrapar algo: abierta y un poco cÃ³ncava
+  atrapar: {
+    pulgar: { f: [0.1, 0.15, 0.1], abrir: 0.3, cruzar: 0.1 },
+    indice: { f: [0.25, 0.3, 0.15], abrir: -0.1 },
+    medio: { f: [0.28, 0.32, 0.15], abrir: -0.03 },
+    anular: { f: [0.3, 0.34, 0.16], abrir: 0.05 },
+    menique: { f: [0.34, 0.36, 0.18], abrir: 0.13 },
+  },
+};
+
+/** Pose de seÃ±as: se estiran los primeros n dedos (1 = Ã­ndice â€¦ 4 = meÃ±ique), el resto en puÃ±o. */
+export function poseSenia(n) {
+  const base = {};
+  const abiertos = ['indice', 'medio', 'anular', 'menique'];
+  const separacion = { indice: -0.1, medio: -0.01, anular: 0.09, menique: 0.21 }; // bien abiertos para contar
+  for (const [nombre, def] of Object.entries(POSES_MANO.puno)) base[nombre] = def;
+  abiertos.forEach((nombre, i) => {
+    if (i < n) base[nombre] = { f: [0.02, 0.02, 0.02], abrir: separacion[nombre] };
+  });
+  base.pulgar = { f: [0.3, 0.45, 0.4], abrir: 0.0, cruzar: 0.85 };
+  return base;
+}
+
+// ---------- Controlador ----------
+
+/**
+ * Mueve los huesos de los dedos de un personaje con suavizado. Se crea una vez por personaje con modelo.
+ *   huesos: { I: { pulgar: [..3], indice: [..3], ... }, D: {...} }
+ */
+export class Manos {
+  constructor(huesos) {
+    this.huesos = huesos;
+    this.estado = { I: this.copiar(POSES_MANO.reposo), D: this.copiar(POSES_MANO.reposo) };
+    this.objetivo = { I: POSES_MANO.reposo, D: POSES_MANO.reposo };
+    this.forzada = { I: null, D: null };
+    this.velocidad = 14;
+    this.aplicar(0, true);
+  }
+
+  copiar(pose) {
+    const r = {};
+    for (const [nombre, d] of Object.entries(pose)) r[nombre] = { f: [...d.f], abrir: d.abrir ?? 0, cruzar: d.cruzar ?? 0 };
+    return r;
+  }
+
+  /** Pose de mano asociada a la pose del brazo (se ignora mientras haya una pose forzada). */
+  pose(lado, nombre) {
+    this.objetivo[lado] = POSES_MANO[nombre] ?? POSES_MANO.reposo;
+  }
+
+  /** Fuerza una pose (por ejemplo las seÃ±as); con null se vuelve a la pose del brazo. */
+  forzar(lado, pose) {
+    this.forzada[lado] = pose;
+  }
+
+  update(dt) {
+    this.aplicar(dt, false);
+  }
+
+  aplicar(dt, inmediato) {
+    const k = inmediato ? 1 : 1 - Math.exp(-this.velocidad * dt);
+    for (const lado of ['I', 'D']) {
+      const meta = this.forzada[lado] ?? this.objetivo[lado];
+      const actual = this.estado[lado];
+      // ConvenciÃ³n de signo: derecha cierra con z negativo, izquierda con z positivo
+      const signo = lado === 'D' ? -1 : 1;
+      for (const nombre of DEDOS) {
+        const cadena = this.huesos[lado][nombre];
+        if (!cadena) continue;
+        const m = meta[nombre] ?? POSES_MANO.reposo[nombre];
+        const a = actual[nombre];
+        for (let i = 0; i < 3; i++) a.f[i] += (m.f[i] - a.f[i]) * k;
+        a.abrir += ((m.abrir ?? 0) - a.abrir) * k;
+        a.cruzar += ((m.cruzar ?? 0) - a.cruzar) * k;
+        for (let i = 0; i < 3; i++) {
+          if (nombre === 'pulgar') {
+            // El pulgar se cierra cruzando la palma: flexiÃ³n (z) + giro hacia los dedos (x)
+            cadena[i].rotation.set(i === 0 ? -a.cruzar : -a.cruzar * 0.25, 0, signo * a.f[i]);
+          } else {
+            cadena[i].rotation.set(0, 0, signo * a.f[i]);
+          }
+        }
+        // apertura lateral en la primera falange (rotaciÃ³n alrededor del eje de la palma)
+        if (nombre !== 'pulgar') cadena[0].rotation.x = a.abrir;
+        else cadena[0].rotation.y = signo * a.abrir;
+      }
+    }
+  }
+}
+=== src/characters/animaciones.js ===
+// AnimaciÃ³n por poses simples: cada pose define rotaciones [x, y, z] (radianes) por articulaciÃ³n.
+// El animador interpola suavemente hacia la pose objetivo y suma "capas" procedurales
+// (escribir, golpear la lapicera, caminar, respirar...) encima.
+//
+// Convenciones (el personaje mira hacia -Z):
+//  - hombro/codo x positivo: el brazo va hacia adelante (Ï€ = brazo arriba)
+//  - hombro z: hacia adentro es + para el izquierdo y - para el derecho
+//  - cabeza x negativo: mira hacia abajo; cabeza y positivo: gira a su izquierda
+//  - torso x negativo: se inclina hacia adelante
+
+//  - pierna x positivo: el muslo va hacia adelante; rodilla x negativo: dobla la rodilla
+//  (cadera, rodillas y tobillos sÃ³lo existen en los personajes con modelo y esqueleto)
+const ARTICULACIONES = [
+  'cadera', 'torso', 'cabeza', 'hombroI', 'codoI', 'munecaI', 'hombroD', 'codoD', 'munecaD',
+  'piernaI', 'piernaD', 'rodillaI', 'rodillaD', 'tobilloI', 'tobilloD',
+];
+
+export const POSES = {
+  sentado: {
+    torso: [-0.08, 0, 0], cabeza: [-0.25, 0, 0],
+    hombroI: [0.6, 0, 0.18], codoI: [0.85, 0, 0], munecaI: [0, -1.3, 0],
+    hombroD: [0.6, 0, -0.18], codoD: [0.85, 0, 0], munecaD: [0, 1.3, 0],
+  },
+  escribir: {
+    torso: [-0.18, 0, 0], cabeza: [-0.55, 0, 0],
+    hombroI: [0.55, 0, 0.3], codoI: [0.95, 0, 0], munecaI: [0, -1.4, 0],
+    hombroD: [0.62, 0, -0.12], codoD: [0.85, 0, 0], munecaD: [0.3, 1.2, 0],
+  },
+  
+// Primera persona: manos apoyadas naturalmente a los costados de la hoja
+  manosEnBanco: {
+    hombroI: [0.55, 0, 0.12], codoI: [0.95, 0, 0], munecaI: [0, -1.45, 0],
+    hombroD: [0.55, 0, -0.12], codoD: [0.95, 0, 0], munecaD: [0, 1.45, 0],
+  },
+  parado: {
+    hombroI: [0.05, 0, -0.08], codoI: [0.15, 0, 0],
+    hombroD: [0.05, 0, 0.08], codoD: [0.15, 0, 0],
+  },
+  // Profesora escribiendo en el pizarrÃ³n (de espaldas a la clase)
+  escribirPizarron: {
+    cabeza: [0.1, 0, 0],
+    hombroI: [0.05, 0, -0.08], codoI: [0.2, 0, 0],
+    hombroD: [2.2, 0, -0.15], codoD: [0.7, 0, 0],
+  },
+  // Profesora estirando el brazo para retirar el examen del banco
+  retirarExamen: {
+    torso: [-0.3, 0, 0], cabeza: [-0.35, 0, 0],
+    hombroI: [0.05, 0, -0.08], codoI: [0.2, 0, 0],
+    hombroD: [1.15, 0, -0.1], codoD: [0.35, 0, 0],
+  },
+  // Manos atrÃ¡s: el brazo rota hacia adentro (y) para que el codo doble hacia la espalda
+  manosAtras: {
+    torso: [0.03, 0, 0],
+    hombroI: [-0.5, -1.4, 0.1], codoI: [1.55, 0, 0],
+    hombroD: [-0.5, 1.4, -0.1], codoD: [1.55, 0, 0],
+  },
+  // SeÃ±as: mano derecha levantada mostrando dedos
+  levantarMano: {
+    torso: [-0.05, 0, 0], cabeza: [-0.05, 0, 0],
+    hombroI: [0.6, 0, 0.25], codoI: [0.9, 0, 0],
+    hombroD: [2.45, 0, -0.2], codoD: [0.55, 0, 0],
+  },
+  // Alumnos de fondo escribiendo: con el torso elevado (modelo.elevarTorso) las manos quedan
+  // apoyadas sobre la tapa del banco y no por debajo (valores medidos con los tres modelos)
+  escribirFondo: {
+    torso: [0, 0, 0], cabeza: [-0.25, 0, 0],
+    hombroI: [0.5, 0, 0], codoI: [1.2, 0, 0], munecaI: [0, -1.2, 0],
+    hombroD: [0.6, 0, 0], codoD: [1.1, 0, 0], munecaD: [0, 1.2, 0],
+  },
+  // Golpes de lapicera: antebrazo derecho elevado (la capa "golpear" lo baja y sube)
+  golpear: {
+    torso: [-0.12, 0, 0], cabeza: [-0.2, 0, 0],
+    hombroI: [0.55, 0, 0.3], codoI: [0.95, 0, 0],
+    hombroD: [0.7, 0, -0.15], codoD: [1.05, 0, 0],
+  },
+  prepararLanzar: {
+    torso: [0.05, 0, 0], cabeza: [0, 0, 0],
+    hombroI: [0.6, 0, 0.25], codoI: [0.9, 0, 0],
+    hombroD: [1.9, 0, -0.3], codoD: [1.6, 0, 0],
+  },
+  lanzar: {
+    torso: [-0.12, 0, 0], cabeza: [0, 0, 0],
+    hombroI: [0.6, 0, 0.25], codoI: [0.9, 0, 0],
+    hombroD: [1.5, 0, -0.1], codoD: [0.1, 0, 0],
+  },
+  // Reclamo / presiÃ³n: brazos abiertos con palmas arriba
+  reclamo: {
+    torso: [0.05, 0, 0], cabeza: [0.1, 0, 0],
+    hombroI: [0.9, 0, -0.5], codoI: [0.9, 0, 0],
+    hombroD: [0.9, 0, 0.5], codoD: [0.9, 0, 0],
+  },
+  // Bronca: brazos cruzados
+  bronca: {
+    torso: [0.08, 0, 0], cabeza: [0.05, 0, 0],
+    hombroI: [0.55, 0, 0.55], codoI: [1.75, 0, 0],
+    hombroD: [0.5, 0, -0.55], codoD: [1.8, 0, 0],
+  },
+  // Sofi: cartelito con el nÃºmero de pregunta en la izquierda y los dedos en la derecha.
+  // Antebrazo izquierdo levantado con el cartel y brazo derecho arriba con los dedos; el cartel y
+  // la mano se agrandan un poco y se orientan al jugador (ver Senias.js).
+  seniaCartel: {
+    torso: [-0.02, 0, 0], cabeza: [0, 0, 0],
+    hombroI: [1.5, 0, -0.9], codoI: [1.8, 0, 0],
+    hombroD: [2.1, 0, 0.5], codoD: [1.0, 0, 0],
+  },
+  // Sofi pidiendo: cartelito con "Â¿N?" y la otra mano abierta, como preguntando
+  seniaPedido: {
+    torso: [0.02, 0, 0], cabeza: [0.08, 0, 0.15],
+    hombroI: [1.5, 0, -0.9], codoI: [1.8, 0, 0],
+    hombroD: [1.6, 0, 0.6], codoD: [1.4, 0, 0],
+  },
+  // Tomi atrapando un papelito
+  atrapar: {
+    torso: [0.05, 0, 0], cabeza: [0.15, 0, 0],
+    hombroI: [1.9, 0, 0.2], codoI: [0.4, 0, 0],
+    hombroD: [1.9, 0, -0.2], codoD: [0.4, 0, 0],
+  },
+  // ---- Protagonista (primera persona: sÃ³lo se ven antebrazos y manos) ----
+  jugMachete: {
+    hombroI: [0.85, 0, 0.2], codoI: [1.05, 0, 0], munecaI: [0, -0.9, 0],
+    hombroD: [0.55, 0, -0.12], codoD: [0.95, 0, 0], munecaD: [0, 1.45, 0],
+  },
+  jugApuntar: {
+    hombroI: [0.55, 0, 0.12], codoI: [0.95, 0, 0],
+    hombroD: [1.7, 0, -0.45], codoD: [1.75, 0, 0],
+  },
+  jugLanzar: {
+    hombroI: [0.55, 0, 0.12], codoI: [0.95, 0, 0],
+    hombroD: [1.55, 0, -0.1], codoD: [0.15, 0, 0],
+  },
+  jugDedos: {
+    hombroI: [0.55, 0, 0.12], codoI: [0.95, 0, 0], munecaI: [0, -1.45, 0],
+    hombroD: [1.85, 0, 0.02], codoD: [0.45, 0, 0],
+  },
+  jugAbrirPapel: {
+    hombroI: [0.58, 0, 0.32], codoI: [0.92, 0, 0], munecaI: [0.2, -1.15, 0],
+    hombroD: [0.58, 0, -0.32], codoD: [0.92, 0, 0], munecaD: [0.2, 1.15, 0],
+  },
+  // ---- Intro: la cena ----
+  // El chico revuelve la comida sin comer, encorvado y con la cabeza gacha
+  // (el torso inclinado lleva los brazos hacia atrÃ¡s: por eso los hombros van bien adelante)
+  cenar: {
+    torso: [-0.3, 0, 0], cabeza: [-0.45, 0, 0],
+    hombroI: [1.3, 0, 0.16], codoI: [0.62, 0, 0], munecaI: [0, -1.4, 0],
+    hombroD: [1.35, 0, -0.04], codoD: [0.55, 0, 0], munecaD: [-0.1, 0.9, 0],
+  },
+  // Codo izquierdo en la mesa y la frente apoyada en la mano
+  agobiado: {
+    torso: [-0.38, 0, 0], cabeza: [-0.6, 0.15, 0.12],
+    hombroI: [1.4, 0, 0.3], codoI: [2.4, 0, 0], munecaI: [0.2, -0.5, 0],
+    hombroD: [1.42, 0, -0.04], codoD: [0.5, 0, 0], munecaD: [-0.1, 0.9, 0],
+  },
+  // Padres: seÃ±alar con el dedo, apoyar las manos en la mesa
+  senalar: {
+    torso: [-0.06, 0, 0],
+    hombroI: [0.1, 0, -0.1], codoI: [0.3, 0, 0],
+    hombroD: [1.45, 0, 0.05], codoD: [0.15, 0, 0],
+  },
+  apoyarMesa: {
+    torso: [-0.5, 0, 0], cabeza: [-0.2, 0, 0],
+    hombroI: [0.75, 0, -0.15], codoI: [0.35, 0, 0],
+    hombroD: [0.75, 0, 0.15], codoD: [0.35, 0, 0],
+  },
+  brazosEnJarra: {
+    torso: [0.04, 0, 0],
+    hombroI: [0.1, 0, -0.65], codoI: [1.6, 0, 0],
+    hombroD: [0.1, 0, 0.65], codoD: [1.6, 0, 0],
+  },
+  // Disimular: todos bajan las manos y miran la hoja
+  disimular: {
+    torso: [-0.2, 0, 0], cabeza: [-0.65, 0, 0],
+    hombroI: [0.55, 0, 0.3], codoI: [0.95, 0, 0],
+    hombroD: [0.6, 0, -0.15], codoD: [0.85, 0, 0],
+  },
+};
+
+// Pose de los dedos que acompaÃ±a a cada pose del brazo (por defecto: relajada).
+// Valores en POSES_MANO (Manos.js). [izquierda, derecha]
+const MANOS_POR_POSE = {
+  escribir: ['plana', 'lapicera'],
+  escribirFondo: ['plana', 'lapicera'],
+  golpear: ['plana', 'lapicera'],
+  disimular: ['plana', 'lapicera'],
+  manosEnBanco: ['plana', 'plana'],
+  jugMachete: ['pinza', 'plana'],
+  jugApuntar: ['plana', 'pinza'],
+  jugLanzar: ['plana', 'abierta'],
+  jugDedos: ['plana', 'abierta'],
+  jugAbrirPapel: ['pinza', 'pinza'],
+  prepararLanzar: ['plana', 'pinza'],
+  lanzar: ['plana', 'abierta'],
+  atrapar: ['atrapar', 'atrapar'],
+  reclamo: ['abierta', 'abierta'],
+  bronca: ['puno', 'puno'],
+  brazosEnJarra: ['puno', 'puno'],
+  senalar: ['reposo', 'senalar'],
+  apoyarMesa: ['plana', 'plana'],
+  retirarExamen: ['reposo', 'pinza'],
+  seniaCartel: ['pinza', 'reposo'],
+  seniaPedido: ['pinza', 'abierta'],
+  cenar: ['plana', 'pinza'],
+  agobiado: ['puno', 'pinza'],
+  escribirPizarron: ['reposo', 'lapicera'],
+};
+
+// Capas procedurales: devuelven offsets que se suman a la pose
+const CAPAS = {
+  respirar: (t, f) => ({ torso: [Math.sin(t * 1.6 + f) * 0.015, 0, 0] }),
+  escribir: (t, f) => ({
+    codoD: [Math.sin(t * 11 + f) * 0.05, 0, 0],
+    hombroD: [0, 0, Math.sin(t * 2.3 + f) * 0.06],
+    cabeza: [0, Math.sin(t * 0.7 + f) * 0.06, 0],
+  }),
+  golpear: (t) => {
+    // tres golpes rÃ¡pidos por ciclo (el sistema de seÃ±as sincroniza el sonido)
+    const fase = (t * 3.2) % 1;
+    return { codoD: [-Math.max(0, Math.sin(fase * Math.PI)) * 0.45, 0, 0] };
+  },
+  // Ciclo de marcha. La fase la avanza quien mueve al personaje segÃºn la DISTANCIA recorrida
+  // (an.faseCaminar), asÃ­ los pies no patinan aunque cambie la velocidad.
+  // ConvenciÃ³n de signos: en brazos y piernas +x = hacia adelante; en torso y cabeza +x = hacia atrÃ¡s.
+  caminar: (t, f, vel = 1, an) => {
+    const fase = an?.faseCaminar ?? t * 7 * vel + f;
+    const s = Math.sin(fase);
+    const c = Math.cos(fase);
+    const A = an?.zancada ?? 0.34; // amplitud del muslo (radianes)
+    const k = A / 0.3;
+    const v = an?.velCamina ?? 0.7; // velocidad real (m/s): inclina el cuerpo al arrancar y al ir rÃ¡pido
+    const bb = an?.balanceoBrazos ?? 1; // los brazos acompaÃ±an (0 = manos atrÃ¡s)
+    // La rodilla se dobla mientras la pierna avanza (balanceo) y queda casi recta al apoyar
+    const rodI = -(0.08 + 0.8 * Math.pow(Math.max(0, c), 1.5)) * k;
+    const rodD = -(0.08 + 0.8 * Math.pow(Math.max(0, -c), 1.5)) * k;
+    const swing = 0.46 * bb * Math.min(1.25, 0.5 + v) * k; // vaivÃ©n de los brazos
+    return {
+      piernaI: [s * A, 0, 0],
+      piernaD: [-s * A, 0, 0],
+      rodillaI: [rodI, 0, 0],
+      rodillaD: [rodD, 0, 0],
+      // El pie llega con la punta arriba (talÃ³n) y despega con la punta abajo
+      tobilloI: [-(s * A + rodI) * 0.7, 0, 0],
+      tobilloD: [-(-s * A + rodD) * 0.7, 0, 0],
+      // La pelvis gira con la pierna que avanza, se inclina hacia el lado de la pierna que
+      // se balancea y se desplaza sobre el pie de apoyo; el torso contrarresta
+      cadera: [0, s * 0.1 * k, -c * 0.035 * k],
+      caderaX: [c * 0.024 * k, 0, 0],
+      torso: [-Math.min(0.09, v * 0.08), -s * 0.17 * k, c * 0.022 * k],
+      // Brazos contra-fase, algo separados del cuerpo y con el codo que acompaÃ±a
+      hombroI: [-s * swing, 0, -0.07],
+      hombroD: [s * swing, 0, 0.07],
+      codoI: [(0.2 + Math.max(0, -s) * 0.45) * bb, 0, 0],
+      codoD: [(0.2 + Math.max(0, s) * 0.45) * bb, 0, 0],
+      // La cabeza compensa el giro del torso y acompaÃ±a con un leve cabeceo
+      cabeza: [Math.cos(fase * 2) * 0.014, s * 0.06 * k, 0],
+      // Sube y baja: mÃ¡s alto con la pierna vertical, mÃ¡s bajo con las piernas abiertas
+      caderaY: [(Math.cos(fase * 2) * 0.022 - 0.016) * k, 0, 0],
+    };
+  },
+  // Quieto pero vivo: cambios de peso, respiraciÃ³n y micro-movimientos de cabeza y hombros
+  vivo: (t, f) => {
+    const w = Math.sin(t * 0.55 + f);
+    return {
+      caderaX: [w * 0.014, 0, 0],
+      cadera: [0, Math.sin(t * 0.31 + f) * 0.03, w * 0.022],
+      torso: [Math.sin(t * 1.6 + f) * 0.014, Math.sin(t * 0.37 + f * 1.3) * 0.03, -w * 0.035],
+      cabeza: [Math.sin(t * 0.9 + f) * 0.025, Math.sin(t * 0.43 + f * 2) * 0.08, w * 0.02],
+      hombroI: [Math.sin(t * 0.8 + f) * 0.025, 0, Math.sin(t * 0.6 + f) * 0.02],
+      hombroD: [Math.sin(t * 0.8 + f + 2) * 0.025, 0, -Math.sin(t * 0.6 + f + 1) * 0.02],
+    };
+  },
+  reclamo: (t, f) => ({
+    hombroI: [Math.sin(t * 6 + f) * 0.12, 0, 0],
+    hombroD: [Math.sin(t * 6 + f + 0.5) * 0.12, 0, 0],
+    cabeza: [0, Math.sin(t * 3 + f) * 0.15, 0],
+  }),
+  bronca: (t, f) => ({ cabeza: [0, Math.sin(t * 2 + f) * 0.2, 0] }),
+  asentir: (t) => ({ cabeza: [Math.sin(t * 9) * 0.18, 0, 0] }),
+  // Revolver la comida con el tenedor, sin ganas
+  revolver: (t, f) => ({
+    hombroD: [Math.sin(t * 1.3 + f) * 0.05, 0, Math.sin(t * 0.9 + f) * 0.07],
+    codoD: [Math.sin(t * 1.3 + f + 1) * 0.07, 0, 0],
+  }),
+  // Retar: gestos enfÃ¡ticos con las manos y la cabeza
+  retar: (t, f) => ({
+    hombroD: [Math.max(0, Math.sin(t * 4.2 + f)) * 0.35, 0, 0],
+    codoD: [Math.max(0, Math.sin(t * 4.2 + f)) * 0.3, 0, 0],
+    cabeza: [Math.sin(t * 5 + f) * 0.06, Math.sin(t * 2.1 + f) * 0.12, 0],
+    torso: [Math.sin(t * 4.2 + f) * 0.03, 0, 0],
+  }),
+};
+
+export class Animador {
+  constructor(personaje) {
+    this.p = personaje;
+    this.actual = {};
+    this.objetivo = {};
+    this.extra = {};   // offsets externos (p. ej., girar la cabeza hacia algo)
+    this.base = {};
+    this.capas = new Map([['respirar', 1]]);   // peso objetivo de cada capa
+    this.pesos = new Map([['respirar', 1]]);   // peso actual (se acerca suave al objetivo)
+    this.velocidad = 6;
+    this.fase = Math.random() * 10;
+    this.velCaminar = 1;
+  }
+
+  articulacion(nombre) {
+    const r = this.p.rig;
+    switch (nombre) {
+      case 'hombroI': return r.brazoI?.hombro;
+      case 'codoI': return r.brazoI?.codo;
+      case 'munecaI': return r.brazoI?.muneca;
+      case 'hombroD': return r.brazoD?.hombro;
+      case 'codoD': return r.brazoD?.codo;
+      case 'munecaD': return r.brazoD?.muneca;
+      default: return r[nombre];
+    }
+  }
+
+  capturarReposo() {
+    for (const n of ARTICULACIONES) {
+      const a = this.articulacion(n);
+      if (a) this.base[n] = [a.rotation.x, a.rotation.y, a.rotation.z];
+    }
+    if (this.p.rig.cadera) {
+      this.baseCaderaY = this.p.rig.cadera.position.y;
+      this.baseCaderaX = this.p.rig.cadera.position.x;
+    }
+  }
+
+  poseInicial(nombre) {
+    this.capturarReposo();
+    this.pose(nombre);
+    for (const n of ARTICULACIONES) this.actual[n] = [...(this.objetivo[n] ?? [0, 0, 0])];
+  }
+
+  pose(nombre, velocidad = 6) {
+    const def = POSES[nombre];
+    if (!def) return;
+    this.poseActual = nombre;
+    this.velocidad = velocidad;
+    for (const n of ARTICULACIONES) this.objetivo[n] = def[n] ?? [0, 0, 0];
+    const manos = MANOS_POR_POSE[nombre] ?? ['reposo', 'reposo'];
+    this.p.manos?.pose('I', manos[0]);
+    this.p.manos?.pose('D', manos[1]);
+  }
+
+  // Las capas entran y salen con una mezcla suave (sin saltos al empezar o dejar de caminar)
+  capa(nombre, peso = 1) {
+    this.capas.set(nombre, Math.max(0, peso));
+    if (!this.pesos.has(nombre)) this.pesos.set(nombre, 0);
+  }
+
+  update(dt, t) {
+    const k = 1 - Math.exp(-this.velocidad * dt);
+    const kCapa = 1 - Math.exp(-(this.velocidadCapas ?? 7) * dt);
+    // offsets de capas
+    const suma = {};
+    for (const [nombre, actual] of this.pesos) {
+      const objetivo = this.capas.get(nombre) ?? 0;
+      const peso = actual + (objetivo - actual) * kCapa;
+      if (objetivo === 0 && peso < 0.002) {
+        this.pesos.delete(nombre);
+        this.capas.delete(nombre);
+        continue;
+      }
+      this.pesos.set(nombre, peso);
+      const off = CAPAS[nombre]?.(t, this.fase, this.velCaminar, this);
+      if (!off) continue;
+      for (const [art, v] of Object.entries(off)) {
+        suma[art] ??= [0, 0, 0];
+        for (let i = 0; i < 3; i++) suma[art][i] += v[i] * peso;
+      }
+    }
+    for (const n of ARTICULACIONES) {
+      const a = this.articulacion(n);
+      if (!a) continue;
+      const obj = this.objetivo[n] ?? [0, 0, 0];
+      const cur = (this.actual[n] ??= [0, 0, 0]);
+      const ex = this.extra[n];
+      for (let i = 0; i < 3; i++) cur[i] += (obj[i] + (ex ? ex[i] : 0) - cur[i]) * k;
+      const b = this.base[n] ?? [0, 0, 0];
+      const s = suma[n];
+      a.rotation.set(b[0] + cur[0] + (s ? s[0] : 0), b[1] + cur[1] + (s ? s[1] : 0), b[2] + cur[2] + (s ? s[2] : 0));
+    }
+    // Rebote vertical de la cadera al caminar
+    if (this.baseCaderaY !== undefined && this.p.rig.cadera) {
+      this.p.rig.cadera.position.y = this.baseCaderaY + (suma.caderaY ? suma.caderaY[0] : 0);
+      // Desplazamiento lateral de la pelvis (cambio de peso)
+      this.p.rig.cadera.position.x = (this.baseCaderaX ?? 0) + (suma.caderaX ? suma.caderaX[0] : 0);
+    }
+  }
+}

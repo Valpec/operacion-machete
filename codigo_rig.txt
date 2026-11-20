@@ -1,0 +1,1696 @@
+﻿=== src/characters/Personaje.js ===
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { toon, contorno, RAMPA, COLOR_CONTORNO } from '../world/materiales.js';
+import { Animador } from './animaciones.js';
+import { autoRig } from './AutoRig.js';
+import { poseSenia } from './Manos.js';
+
+// Medidas base del placeholder (en metros)
+const M = {
+  caderaSentado: 0.5,
+  caderaParado: 0.95,
+  radioTorso: 0.16,
+  largoTorso: 0.3,
+  altoHombro: 0.55,
+  anchoHombro: 0.21,
+  altoCuello: 0.64,
+  radioCabeza: 0.12,
+  largoBrazo: 0.27,
+  largoAntebrazo: 0.25,
+  radioBrazo: 0.045,
+};
+
+const loader = new GLTFLoader();
+
+// Modelos precargados (ruta -> gltf). Se llenan con precargarModelos() antes de armar el elenco,
+// asÃ­ los personajes se construyen con su esqueleto de una vez y los sistemas que cuelgan cosas
+// de las manos (cartelito, papelito, lapicera) ya encuentran las articulaciones definitivas.
+const cacheModelos = new Map();
+
+const _v1 = new THREE.Vector3();
+const _v2 = new THREE.Vector3();
+const _v3 = new THREE.Vector3();
+const _v4 = new THREE.Vector3();
+const _v5 = new THREE.Vector3();
+
+export async function precargarModelos(rutas, alProgresar) {
+  let listos = 0;
+  await Promise.all(
+    [...new Set(rutas)].map(
+      (ruta) =>
+        new Promise((resolver) => {
+          loader.load(
+            ruta,
+            (gltf) => {
+              cacheModelos.set(ruta, gltf);
+              alProgresar?.(++listos, rutas.length);
+              resolver();
+            },
+            undefined,
+            (err) => {
+              console.warn(`No se pudo cargar ${ruta}; ese personaje queda como placeholder.`, err);
+              alProgresar?.(++listos, rutas.length);
+              resolver();
+            },
+          );
+        }),
+    ),
+  );
+}
+
+/**
+ * FÃ¡brica de personajes.
+ *   crearPersonaje({ tipo: 'placeholder', ...config })
+ *   crearPersonaje({ tipo: 'glb', ruta: '/modelos/x.glb', ... })
+ * Siempre devuelve un Personaje con la misma interfaz (raiz, animador, mostrarDedos, etc.).
+ */
+export function crearPersonaje(config, nombre = 'personaje') {
+  const p = new Personaje(config, nombre);
+  const gltf = config.modelo && cacheModelos.get(config.modelo.ruta);
+  if (gltf && config.modelo.rig !== false) {
+    // Modelo estÃ¡tico + esqueleto generado por cÃ³digo (ver AutoRig.js)
+    try {
+      p.construirConModelo(config, gltf);
+      return p;
+    } catch (e) {
+      console.warn(`No se pudo armar el esqueleto de ${config.modelo.ruta}; queda el placeholder.`, e);
+      p.raiz.clear();
+      p.rig = {};
+    }
+  }
+  if (config.tipo === 'glb') p.cargarGLB(config);
+  else p.construirPlaceholder(config);
+  // Modelo estÃ¡tico sin esqueleto como "piel" (modo viejo: rig: false)
+  if (config.modelo && config.modelo.rig === false) p.cargarModeloEstatico(config.modelo);
+  return p;
+}
+
+export class Personaje {
+  constructor(config, nombre) {
+    this.config = config;
+    this.nombre = nombre;
+    this.raiz = new THREE.Group();
+    this.raiz.name = nombre;
+    this.raiz.userData.personaje = this;
+    this.rig = {};
+    this.mixer = null;
+    this.animador = new Animador(this);
+  }
+
+  // ---------- Placeholder hecho con primitivas ----------
+  construirPlaceholder(cfg) {
+    const sentado = cfg.postura === 'sentado';
+    const matBuzo = toon(cfg.buzo);
+    const matPiel = toon(cfg.piel);
+    const matPantalon = toon(cfg.pantalon ?? 0x3b4a66);
+
+    const cadera = new THREE.Group();
+    cadera.position.y = sentado ? M.caderaSentado : M.caderaParado;
+    this.raiz.add(cadera);
+    this.rig.cadera = cadera;
+
+    // Torso (pivote en la cadera para poder inclinarlo)
+    const torso = new THREE.Group();
+    cadera.add(torso);
+    this.rig.torso = torso;
+
+    if (!cfg.soloBrazos) {
+      const cuerpo = new THREE.Mesh(new THREE.CapsuleGeometry(M.radioTorso, M.largoTorso, 6, 14), matBuzo);
+      cuerpo.position.y = M.radioTorso + M.largoTorso / 2;
+      cuerpo.scale.z = 0.8;
+      cuerpo.castShadow = true;
+      contorno(cuerpo, 0.012);
+      torso.add(cuerpo);
+      this.construirPiernas(cfg, sentado, matPantalon);
+      this.construirCabeza(cfg, torso, matPiel, matBuzo);
+    }
+
+    this.rig.brazoI = this.construirBrazo(torso, -1, matBuzo, matPiel, cfg);
+    this.rig.brazoD = this.construirBrazo(torso, 1, matBuzo, matPiel, cfg);
+
+    if (cfg.escala) this.raiz.scale.setScalar(cfg.escala);
+    this.animador.poseInicial(sentado ? (cfg.soloBrazos ? 'manosEnBanco' : 'sentado') : 'parado');
+  }
+
+  construirPiernas(cfg, sentado, matPantalon) {
+    const zapato = toon(0x26242a);
+    for (const lado of [-1, 1]) {
+      if (sentado) {
+        const muslo = new THREE.Mesh(new THREE.CapsuleGeometry(0.07, 0.3, 4, 8), matPantalon);
+        muslo.rotation.x = Math.PI / 2;
+        muslo.position.set(lado * 0.09, M.caderaSentado + 0.02, -0.2);
+        muslo.castShadow = true;
+        contorno(muslo, 0.01);
+        this.raiz.add(muslo);
+        const pierna = new THREE.Mesh(new THREE.CapsuleGeometry(0.06, 0.38, 4, 8), matPantalon);
+        pierna.position.set(lado * 0.09, 0.27, -0.4);
+        pierna.castShadow = true;
+        contorno(pierna, 0.01);
+        this.raiz.add(pierna);
+        const pie = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.07, 0.2), zapato);
+        pie.position.set(lado * 0.09, 0.04, -0.46);
+        contorno(pie, 0.008);
+        this.raiz.add(pie);
+      } else {
+        // Pivote en la cadera para poder balancear la pierna al caminar
+        const pivote = new THREE.Group();
+        const altoPivote = M.caderaParado - 0.05;
+        pivote.position.set(lado * 0.085, altoPivote, 0);
+        this.raiz.add(pivote);
+        this.rig['pierna' + (lado < 0 ? 'I' : 'D')] = pivote;
+        const pierna = new THREE.Mesh(new THREE.CapsuleGeometry(0.055, altoPivote - 0.12, 4, 8), matPantalon);
+        pierna.position.y = -altoPivote / 2;
+        pierna.castShadow = true;
+        contorno(pierna, 0.008);
+        pivote.add(pierna);
+        const pie = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.07, 0.22), zapato);
+        pie.position.set(0, -altoPivote + 0.035, -0.04);
+        contorno(pie, 0.008);
+        pivote.add(pie);
+      }
+    }
+    if (!sentado && cfg.pollera) {
+      const pollera = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.25, 0.55, 16), toon(cfg.pollera));
+      pollera.position.y = -0.22;
+      pollera.castShadow = true;
+      contorno(pollera, 0.012);
+      this.rig.cadera.add(pollera);
+    }
+  }
+
+  construirCabeza(cfg, torso, matPiel, matBuzo) {
+    const cuello = new THREE.Group();
+    cuello.position.y = M.altoCuello;
+    torso.add(cuello);
+    this.rig.cuello = cuello;
+
+    const cuelloMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.055, 0.1, 8), matPiel);
+    cuelloMesh.position.y = 0.02;
+    cuello.add(cuelloMesh);
+
+    const cabeza = new THREE.Group();
+    cabeza.position.y = 0.13;
+    cabeza.rotation.order = 'YXZ';
+    cuello.add(cabeza);
+    this.rig.cabeza = cabeza;
+
+    const r = M.radioCabeza;
+    const craneo = new THREE.Mesh(new THREE.SphereGeometry(r, 18, 14), matPiel);
+    craneo.castShadow = true;
+    contorno(craneo, 0.01);
+    cabeza.add(craneo);
+
+    // Ojos y nariz: dejan leer hacia dÃ³nde mira (clave para la profesora).
+    // sinRostro: los padres de la intro no tienen cara (el chico no puede ni mirarlos)
+    const matOjo = new THREE.MeshBasicMaterial({ color: 0x15121a });
+    for (const lado of cfg.sinRostro ? [] : [-1, 1]) {
+      const ojo = new THREE.Mesh(new THREE.SphereGeometry(0.016, 8, 6), matOjo);
+      ojo.position.set(lado * 0.045, 0.015, -r * 0.93);
+      cabeza.add(ojo);
+    }
+    if (!cfg.sinRostro) {
+      const nariz = new THREE.Mesh(new THREE.SphereGeometry(0.022, 8, 6), matPiel);
+      nariz.position.set(0, -0.015, -r * 1.02);
+      cabeza.add(nariz);
+    }
+
+    if (cfg.pelo) this.construirPelo(cabeza, cfg.pelo, r);
+    if (cfg.capucha) {
+      const capucha = new THREE.Mesh(
+        new THREE.SphereGeometry(r * 1.32, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.62),
+        toon(cfg.buzo, { side: THREE.DoubleSide }),
+      );
+      capucha.rotation.x = 0.55;
+      capucha.position.set(0, 0.01, 0.02);
+      contorno(capucha, 0.012);
+      cabeza.add(capucha);
+      // pliegue de la capucha sobre la espalda
+      const pliegue = new THREE.Mesh(new THREE.SphereGeometry(0.13, 12, 8), matBuzo);
+      pliegue.scale.set(1.2, 0.6, 0.7);
+      pliegue.position.set(0, -0.16, 0.1);
+      contorno(pliegue, 0.01);
+      cabeza.add(pliegue);
+    }
+    if (cfg.anteojos) {
+      const matMarco = new THREE.MeshBasicMaterial({ color: 0x1a1a1a });
+      for (const lado of [-1, 1]) {
+        const lente = new THREE.Mesh(new THREE.TorusGeometry(0.032, 0.006, 6, 16), matMarco);
+        lente.position.set(lado * 0.047, 0.015, -r * 1.0);
+        cabeza.add(lente);
+      }
+      const puente = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.006, 0.006), matMarco);
+      puente.position.set(0, 0.02, -r * 1.02);
+      cabeza.add(puente);
+    }
+  }
+
+  construirPelo(cabeza, pelo, r) {
+    const mat = toon(pelo.color);
+    // Casquete: media esfera inclinada hacia atrÃ¡s para dejar la frente libre
+    const casquete = new THREE.Mesh(new THREE.SphereGeometry(r * 1.08, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.5), mat);
+    casquete.rotation.x = 0.8;
+    casquete.castShadow = true;
+    contorno(casquete, 0.008);
+    cabeza.add(casquete);
+
+    if (pelo.estilo === 'coleta') {
+      const coleta = new THREE.Mesh(new THREE.CapsuleGeometry(0.042, 0.2, 4, 8), mat);
+      // Cuelga desde la parte de atrÃ¡s y arriba de la cabeza, hacia abajo y afuera
+      coleta.position.set(0, -0.03, r + 0.05);
+      coleta.rotation.x = -0.4;
+      contorno(coleta, 0.008);
+      cabeza.add(coleta);
+      this.rig.coleta = coleta;
+      const gomita = new THREE.Mesh(new THREE.TorusGeometry(0.035, 0.012, 6, 12), toon(0xf05a8a));
+      gomita.position.set(0, 0.08, r * 0.95);
+      gomita.rotation.x = Math.PI / 2 - 0.4;
+      cabeza.add(gomita);
+    } else if (pelo.estilo === 'rodete') {
+      const rodete = new THREE.Mesh(new THREE.SphereGeometry(0.065, 12, 10), mat);
+      rodete.position.set(0, 0.09, r * 0.85);
+      contorno(rodete, 0.008);
+      cabeza.add(rodete);
+    } else if (pelo.estilo === 'largo') {
+      const largo = new THREE.Mesh(new THREE.CapsuleGeometry(0.11, 0.2, 4, 12), mat);
+      largo.scale.set(1.15, 1, 0.55);
+      largo.position.set(0, -0.12, r * 0.55);
+      largo.castShadow = true;
+      contorno(largo, 0.008);
+      cabeza.add(largo);
+    }
+  }
+
+  construirBrazo(torso, lado, matBuzo, matPiel, cfg) {
+    const hombro = new THREE.Group();
+    hombro.position.set(lado * M.anchoHombro, M.altoHombro, 0);
+    torso.add(hombro);
+
+    const brazo = new THREE.Mesh(new THREE.CapsuleGeometry(M.radioBrazo, M.largoBrazo - M.radioBrazo, 4, 8), matBuzo);
+    brazo.position.y = -M.largoBrazo / 2;
+    brazo.castShadow = true;
+    if (cfg.soloBrazos) brazo.visible = false; // en primera persona sÃ³lo se ven antebrazos y manos
+    else contorno(brazo, 0.008);
+    hombro.add(brazo);
+
+    const codo = new THREE.Group();
+    codo.position.y = -M.largoBrazo;
+    hombro.add(codo);
+
+    const antebrazo = new THREE.Mesh(
+      new THREE.CapsuleGeometry(M.radioBrazo * 0.95, M.largoAntebrazo - M.radioBrazo, 4, 8),
+      matBuzo,
+    );
+    antebrazo.position.y = -M.largoAntebrazo / 2;
+    antebrazo.castShadow = true;
+    contorno(antebrazo, cfg.soloBrazos ? 0.004 : 0.008);
+    codo.add(antebrazo);
+
+    const muneca = new THREE.Group();
+    muneca.position.y = -M.largoAntebrazo;
+    codo.add(muneca);
+    const mano = new THREE.Mesh(new THREE.SphereGeometry(0.048, 12, 10), matPiel);
+    mano.scale.set(0.9, 1.1, 0.6);
+    mano.position.y = -0.04;
+    mano.castShadow = true;
+    contorno(mano, cfg.soloBrazos ? 0.004 : 0.007);
+    muneca.add(mano);
+
+    // Dedos (para las seÃ±as): exagerados para que se lean a distancia
+    const dedos = [];
+    for (let i = 0; i < 4; i++) {
+      const dedo = new THREE.Mesh(new THREE.CapsuleGeometry(0.013, 0.07, 3, 6), matPiel);
+      dedo.position.set((i - 1.5) * 0.024 * -lado, -0.12, 0);
+      dedo.visible = false;
+      contorno(dedo, 0.005);
+      muneca.add(dedo);
+      dedos.push(dedo);
+    }
+
+    let lapicera = null;
+    if (cfg.lapicera || cfg.soloBrazos) {
+      lapicera = new THREE.Mesh(new THREE.CylinderGeometry(0.005, 0.005, 0.11, 6), toon(0x2050c0));
+      lapicera.position.set(0, -0.06, -0.03);
+      lapicera.rotation.x = Math.PI / 2;
+      lapicera.visible = false;
+      muneca.add(lapicera);
+    }
+
+    return { hombro, codo, muneca, mano, dedos, lapicera, brazo, antebrazo };
+  }
+
+  // ---------- Modelo con esqueleto automÃ¡tico ----------
+  construirConModelo(cfg, gltf) {
+    const m = cfg.modelo;
+    const sentado = cfg.postura === 'sentado';
+    const { rig, malla, contorno: bordes, articulaciones, manos } = autoRig(this.raiz, gltf.scene, m);
+    this.manos = manos; // dedos articulados (null si no se detectaron: queda la mano postiza)
+    this.rig = rig;
+    this.malla = malla;
+    this.mallaContorno = bordes;
+    this.articulaciones = articulaciones;
+    this.conModelo = true;
+
+    // Lapicera (y mano postiza de respaldo si no se detectaron los dedos del modelo)
+    const matPiel = toon(m.piel ?? cfg.piel ?? 0xeec29c);
+    for (const [lado, signo] of [['brazoI', -1], ['brazoD', 1]]) {
+      const br = rig[lado];
+      if (!manos) this.construirManoPostiza(br, signo, matPiel);
+      if (cfg.lapicera || cfg.soloBrazos || m.lapicera) {
+        const lapicera = new THREE.Mesh(new THREE.CylinderGeometry(0.005, 0.005, 0.12, 6), toon(0x2050c0));
+        lapicera.position.set(0.01 * signo, -0.075, -0.03);
+        lapicera.rotation.x = Math.PI / 2;
+        lapicera.visible = false;
+        br.muneca.add(lapicera);
+        br.lapicera = lapicera;
+      }
+    }
+
+    // VisiÃ³n, highlight y oclusiÃ³n usan una caja simple en vez de la malla con piel (mucho mÃ¡s barato)
+    const caja = sentado
+      ? new THREE.Box3(new THREE.Vector3(-0.28, 0.35, -0.45), new THREE.Vector3(0.28, 1.32, 0.25))
+      : new THREE.Box3(new THREE.Vector3(-0.3, 0, -0.22), new THREE.Vector3(0.3, m.altura, 0.22));
+    const inversa = new THREE.Matrix4();
+    const rayoLocal = new THREE.Ray();
+    const punto = new THREE.Vector3();
+    malla.raycast = (raycaster, intersecciones) => {
+      inversa.copy(this.raiz.matrixWorld).invert();
+      rayoLocal.copy(raycaster.ray).applyMatrix4(inversa);
+      if (!rayoLocal.intersectBox(caja, punto)) return;
+      punto.applyMatrix4(this.raiz.matrixWorld);
+      const distancia = raycaster.ray.origin.distanceTo(punto);
+      if (distancia < raycaster.near || distancia > raycaster.far) return;
+      intersecciones.push({ distance: distancia, point: punto.clone(), object: malla });
+    };
+
+    // Postura: sentado = cadera a la altura del asiento, muslos adelante y piernas abajo
+    if (sentado) {
+      rig.cadera.position.y = m.alturaCadera ?? 0.52;
+      rig.cadera.position.z += m.offsetCaderaZ ?? 0.04;
+      // Torso mÃ¡s alto (sentarse derecho): sube el tronco, la cabeza y los brazos; las piernas quedan
+      if (m.elevarTorso) rig.torso.position.y += m.elevarTorso;
+      for (const [lado, signo] of [['I', -1], ['D', 1]]) {
+        rig['pierna' + lado].rotation.set(Math.PI / 2 - 0.05, 0, -signo * 0.06);
+        rig['rodilla' + lado].rotation.set(-Math.PI / 2 + 0.12, 0, signo * 0.04);
+        rig['tobillo' + lado].rotation.set(-0.05, 0, 0);
+      }
+    }
+    if (cfg.escala) this.raiz.scale.setScalar(cfg.escala);
+    // Primera persona: la cabeza no se dibuja (la cÃ¡mara estÃ¡ ahÃ­)
+    if (cfg.soloBrazos) rig.cabeza.scale.setScalar(0.001);
+    this.animador.poseInicial(sentado ? (cfg.soloBrazos ? 'manosEnBanco' : 'sentado') : 'parado');
+  }
+
+  // ---------- Mano de seÃ±as (Sofi): agrandada y con la palma hacia el jugador ----------
+  estadoManoSenia(lado) {
+    this._manoSenia ??= {
+      I: { escala: 1, objetivo: 1, giro: 0, punto: null },
+      D: { escala: 1, objetivo: 1, giro: 0, punto: null },
+    };
+    return this._manoSenia[lado === 'brazoI' || lado === 'I' ? 'I' : 'D'];
+  }
+
+  /** Agranda (o devuelve a su tamaÃ±o) la mano del modelo, con transiciÃ³n suave. */
+  escalarMano(lado, factor) {
+    this.estadoManoSenia(lado).objetivo = factor;
+  }
+
+  /** Gira la muÃ±eca para que la palma mire a un punto del mundo (null = sin girar). */
+  orientarPalma(lado, punto) {
+    const e = this.estadoManoSenia(lado);
+    e.punto = punto ? (e.punto ?? new THREE.Vector3()).copy(punto) : null;
+  }
+
+  actualizarManoSenia(dt) {
+    if (!this._manoSenia) return;
+    const k = 1 - Math.exp(-8 * dt);
+    for (const lado of ['I', 'D']) {
+      const e = this._manoSenia[lado];
+      const br = this.rig['brazo' + lado];
+      if (!br?.manoModelo) continue;
+      e.escala += (e.objetivo - e.escala) * k;
+      br.manoModelo.scale.setScalar(e.escala);
+      let giro = 0;
+      if (e.punto) {
+        // La palma mira hacia -x local en la mano derecha y +x en la izquierda (pose de atadura).
+        // Se gira alrededor del eje del antebrazo (y local) hasta que apunte al punto.
+        br.muneca.updateWorldMatrix(true, false);
+        const m = br.muneca.matrixWorld;
+        const eje = _v1.setFromMatrixColumn(m, 1).normalize();
+        const centro = _v2.setFromMatrixPosition(m);
+        const normal = _v3.set(lado === 'D' ? -1 : 1, 0, 0).transformDirection(m);
+        const meta = _v4.copy(e.punto).sub(centro);
+        normal.addScaledVector(eje, -normal.dot(eje)).normalize();
+        meta.addScaledVector(eje, -meta.dot(eje));
+        if (meta.lengthSq() > 1e-6) {
+          meta.normalize();
+          giro = Math.atan2(eje.dot(_v5.crossVectors(normal, meta)), normal.dot(meta));
+        }
+      }
+      e.giro += (giro - e.giro) * k;
+      br.muneca.rotation.y += e.giro;
+    }
+  }
+
+  // Mano "postiza" con dedos exagerados: sÃ³lo si no se pudieron detectar los dedos del modelo
+  construirManoPostiza(br, signo, matPiel) {
+    const mano = new THREE.Mesh(new THREE.SphereGeometry(0.05, 12, 10), matPiel);
+    mano.scale.set(0.9, 1.15, 0.65);
+    mano.position.y = -0.045;
+    mano.visible = false;
+    contorno(mano, 0.006);
+    br.muneca.add(mano);
+    br.mano = mano;
+    for (let i = 0; i < 4; i++) {
+      const dedo = new THREE.Mesh(new THREE.CapsuleGeometry(0.012, 0.065, 3, 6), matPiel);
+      dedo.position.set((i - 1.5) * 0.022 * -signo, -0.115, 0);
+      dedo.visible = false;
+      contorno(dedo, 0.005);
+      br.muneca.add(dedo);
+      br.dedos.push(dedo);
+    }
+  }
+
+  // ---------- Modelo GLB ----------
+  cargarGLB(cfg) {
+    loader.load(
+      cfg.ruta,
+      (gltf) => {
+        const modelo = gltf.scene;
+        modelo.traverse((o) => {
+          if (o.isMesh) o.castShadow = true;
+        });
+        if (cfg.escala) modelo.scale.setScalar(cfg.escala);
+        this.raiz.add(modelo);
+        // Mapear huesos del modelo a las articulaciones que usa el animador
+        if (cfg.huesos) {
+          for (const [articulacion, nombreHueso] of Object.entries(cfg.huesos)) {
+            const hueso = modelo.getObjectByName(nombreHueso);
+            if (!hueso) continue;
+            if (articulacion.startsWith('hombro') || articulacion.startsWith('codo')) {
+              const lado = articulacion.endsWith('I') ? 'brazoI' : 'brazoD';
+              this.rig[lado] ??= { dedos: [] };
+              this.rig[lado][articulacion.startsWith('hombro') ? 'hombro' : 'codo'] = hueso;
+            } else {
+              this.rig[articulacion] = hueso;
+            }
+          }
+        }
+        if (gltf.animations.length) {
+          this.mixer = new THREE.AnimationMixer(modelo);
+          const clip = THREE.AnimationClip.findByName(gltf.animations, cfg.animacion) ?? gltf.animations[0];
+          this.mixer.clipAction(clip).play();
+        }
+        this.animador.capturarReposo();
+      },
+      undefined,
+      (err) => console.warn(`No se pudo cargar ${cfg.ruta}; queda vacÃ­o.`, err),
+    );
+  }
+
+  // ---------- Modelo estÃ¡tico (malla sin esqueleto) ----------
+  cargarModeloEstatico(m) {
+    loader.load(
+      m.ruta,
+      (gltf) => {
+        const modelo = gltf.scene;
+        // Cel-shading: se reemplaza el material PBR por uno toon con la misma textura
+        modelo.traverse((o) => {
+          if (!o.isMesh) return;
+          const original = o.material;
+          o.material = new THREE.MeshToonMaterial({ map: original.map ?? null, color: original.map ? 0xffffff : original.color, gradientMap: RAMPA });
+          original.dispose();
+          o.castShadow = true;
+          o.receiveShadow = true;
+        });
+        // Escala por altura y pies apoyados en el piso (el origen del archivo puede estar en cualquier lado)
+        const caja = new THREE.Box3().setFromObject(modelo);
+        const alto = caja.max.y - caja.min.y;
+        const escalaRaiz = this.raiz.scale.y || 1;
+        const s = m.altura / alto / escalaRaiz;
+        // Contorno como el resto de la escena: copia de la malla inflada por las normales, de espaldas
+        const grosor = (m.contorno ?? 0.012) / (s * escalaRaiz);
+        const matContorno = new THREE.MeshBasicMaterial({ color: COLOR_CONTORNO, side: THREE.BackSide });
+        matContorno.onBeforeCompile = (shader) => {
+          shader.vertexShader = shader.vertexShader.replace(
+            '#include <begin_vertex>',
+            `#include <begin_vertex>\n  transformed += normalize(normal) * ${grosor.toFixed(5)};`,
+          );
+        };
+        const mallas = [];
+        modelo.traverse((o) => o.isMesh && mallas.push(o));
+        for (const o of mallas) {
+          const borde = new THREE.Mesh(o.geometry, matContorno);
+          borde.userData.esContorno = true;
+          borde.raycast = () => {};
+          o.add(borde);
+        }
+        modelo.scale.setScalar(s);
+        modelo.position.y = -caja.min.y * s;
+        // Pivote para inclinarlo y balancearlo al caminar (no tiene huesos)
+        this.pivoteModelo = new THREE.Group();
+        this.pivoteModelo.rotation.order = 'YXZ';
+        this.pivoteModelo.rotation.y = m.rotacionY ?? 0;
+        this.pivoteModelo.add(modelo);
+        this.raiz.add(this.pivoteModelo);
+        // Punto de la mano derecha (para sostener cosas, como la hoja retirada)
+        this.manoModelo = new THREE.Object3D();
+        this.manoModelo.position.set(...(m.manoDerecha ?? [0.5, 0.85, -0.05]));
+        this.raiz.add(this.manoModelo);
+        // ReciÃ©n ahora se oculta el placeholder (asÃ­ nunca queda el personaje invisible)
+        this.raiz.traverse((o) => {
+          if (o.isMesh && !this.pivoteModelo.getObjectById(o.id)) o.visible = false;
+        });
+      },
+      undefined,
+      (err) => console.warn(`No se pudo cargar ${m.ruta}; queda el placeholder.`, err),
+    );
+  }
+
+  // Objeto al que se le pueden "dar" cosas en la mano derecha
+  puntoMano() {
+    return this.manoModelo ?? this.rig.brazoD?.muneca ?? this.raiz;
+  }
+
+  // CuÃ¡nto mide de alto el personaje (para encuadres y la mirada de la profe)
+  get altura() {
+    return (this.config.modelo?.altura ?? 1.5) * (this.config.escala ?? 1);
+  }
+
+  // AnimaciÃ³n procedural del modelo estÃ¡tico: balanceo al caminar e inclinaciÃ³n segÃºn la pose
+  animarModeloEstatico(dt, t) {
+    const pv = this.pivoteModelo;
+    const caminar = this.animador.capas.get('caminar') ?? 0;
+    const ritmo = t * 7 * (this.animador.velCaminar || 1);
+    const k = 1 - Math.exp(-8 * dt);
+    const inclinar = this.animador.poseActual === 'retirarExamen' ? -0.18 : this.animador.poseActual === 'escribirPizarron' ? 0.04 : 0;
+    pv.position.y += (Math.abs(Math.sin(ritmo)) * 0.035 * caminar - pv.position.y) * k;
+    pv.rotation.z += (Math.sin(ritmo) * 0.035 * caminar - pv.rotation.z) * k;
+    pv.rotation.x += (inclinar - pv.rotation.x) * k;
+  }
+
+  // ---------- Interfaz comÃºn ----------
+  mostrarDedos(cantidad, lado = 'brazoD') {
+    // Con dedos articulados: se estiran los primeros n y el resto queda en puÃ±o
+    if (this.manos) {
+      this.manos.forzar(lado === 'brazoI' ? 'I' : 'D', cantidad > 0 ? poseSenia(cantidad) : null);
+      return;
+    }
+    const br = this.rig[lado];
+    const dedos = br?.dedos ?? [];
+    dedos.forEach((d, i) => (d.visible = i < cantidad));
+    // Mano rÃ­gida: se cambia la mano del modelo por la mano de seÃ±as
+    if (br?.manoModelo && br.mano) {
+      const senia = cantidad > 0;
+      br.manoModelo.scale.setScalar(senia ? 0.3 : 1);
+      br.mano.visible = senia;
+    }
+  }
+
+  mostrarLapicera(visible, lado = 'brazoD') {
+    const l = this.rig[lado]?.lapicera;
+    if (l) l.visible = visible;
+  }
+
+  // PosiciÃ³n mundial de la cabeza (para visiÃ³n, mirada, audio)
+  posicionCabeza(destino = new THREE.Vector3()) {
+    const obj = this.rig.cabeza ?? this.raiz;
+    return obj.getWorldPosition(destino);
+  }
+
+  update(dt, t) {
+    this.mixer?.update(dt);
+    this.animador.update(dt, t);
+    this.manos?.update(dt);
+    this.actualizarManoSenia(dt);
+    if (this.pivoteModelo) this.animarModeloEstatico(dt, t);
+  }
+}
+=== src/characters/AutoRig.js ===
+import * as THREE from 'three';
+import { RAMPA, COLOR_CONTORNO } from '../world/materiales.js';
+import { crearMuestreador, clasificarRegiones, prepararRecolor } from './Recolor.js';
+import { detectarDedos, crearHuesosDedos, pesosDedos, Manos } from './Manos.js';
+
+/**
+ * Auto-rig de modelos estÃ¡ticos (mallas sin esqueleto en pose A, como las que exportan
+ * los generadores de personajes 3D).
+ *
+ * 1. Normaliza la malla: altura en metros, mirando a -Z, pies en y = 0.
+ * 2. Detecta las articulaciones cortando el cuerpo en rebanadas horizontales
+ *    (dÃ³nde se separan los brazos del torso, dÃ³nde estÃ¡ el cuello, las piernas, etc.).
+ * 3. Arma un esqueleto con LOS MISMOS NOMBRES Y CONVENCIONES que el personaje placeholder
+ *    (cadera, torso, cuello, cabeza, brazoI/D.{hombro,codo,muneca}, piernaI/D...), asÃ­ el
+ *    Animador y todos los sistemas funcionan igual con el modelo.
+ * 4. Calcula los pesos de piel por distancia a cada hueso (con reglas por zona).
+ *
+ * Los brazos se "atan" en la orientaciÃ³n de la pose A, de modo que con rotaciÃ³n 0 el brazo
+ * cuelga recto hacia abajo, igual que en el placeholder.
+ */
+
+const _v = new THREE.Vector3();
+const _a = new THREE.Vector3();
+const _b = new THREE.Vector3();
+const ABAJO = new THREE.Vector3(0, -1, 0);
+
+// ---------- NormalizaciÃ³n ----------
+function geometriaNormalizada(escena, { altura, rotacionY = 0 }) {
+  escena.updateMatrixWorld(true);
+  const mallas = [];
+  escena.traverse((o) => o.isMesh && mallas.push(o));
+  if (!mallas.length) throw new Error('El modelo no tiene mallas');
+  // Se usa la malla mÃ¡s grande (los generadores exportan una sola)
+  mallas.sort((m1, m2) => m2.geometry.attributes.position.count - m1.geometry.attributes.position.count);
+  const malla = mallas[0];
+  const g = malla.geometry.clone();
+  g.applyMatrix4(malla.matrixWorld);
+  if (rotacionY) g.rotateY(rotacionY);
+  g.computeBoundingBox();
+  const bb = g.boundingBox;
+  const s = altura / (bb.max.y - bb.min.y);
+  g.translate(0, -bb.min.y, 0);
+  g.scale(s, s, s);
+  // Centro horizontal: x del eje de simetrÃ­a, z del torso (para que se siente donde va el placeholder)
+  const pos = g.attributes.position;
+  let sx = 0;
+  let sz = 0;
+  let n = 0;
+  for (let i = 0; i < pos.count; i++) {
+    const y = pos.getY(i);
+    if (y > altura * 0.5 && y < altura * 0.75 && Math.abs(pos.getX(i)) < altura * 0.12) {
+      sx += pos.getX(i);
+      sz += pos.getZ(i);
+      n++;
+    }
+  }
+  g.translate(-(n ? sx / n : 0), 0, -(n ? sz / n : 0));
+  if (!g.attributes.normal) g.computeVertexNormals();
+  return { geometria: g, material: malla.material };
+}
+
+// ---------- Rebanadas horizontales ----------
+// Agrupa los vÃ©rtices de una franja de altura en "islas" separadas en x (brazos, torso, piernas)
+function rebanada(pos, y, banda, hueco) {
+  const pts = [];
+  for (let i = 0; i < pos.count; i++) {
+    const py = pos.getY(i);
+    if (Math.abs(py - y) < banda) pts.push(i);
+  }
+  pts.sort((i, j) => pos.getX(i) - pos.getX(j));
+  const islas = [];
+  let actual = null;
+  let ultimoX = -Infinity;
+  for (const i of pts) {
+    const x = pos.getX(i);
+    if (!actual || x - ultimoX > hueco) {
+      actual = { min: x, max: x, sz: 0, n: 0 };
+      islas.push(actual);
+    }
+    actual.max = x;
+    actual.sz += pos.getZ(i);
+    actual.n++;
+    ultimoX = x;
+  }
+  for (const isla of islas) {
+    isla.centro = (isla.min + isla.max) / 2;
+    isla.z = isla.sz / isla.n;
+    isla.ancho = isla.max - isla.min;
+  }
+  // Se descartan islas mÃ­nimas (ruido de la malla)
+  return islas.filter((isla) => isla.n >= 3);
+}
+
+function ajusteLineal(puntos) {
+  // x = a + b*y por mÃ­nimos cuadrados
+  let sy = 0, sx = 0, syy = 0, sxy = 0;
+  const n = puntos.length;
+  for (const p of puntos) {
+    sy += p.y; sx += p.x; syy += p.y * p.y; sxy += p.x * p.y;
+  }
+  const b = (n * sxy - sx * sy) / Math.max(1e-9, n * syy - sy * sy);
+  return { a: (sx - b * sy) / n, b };
+}
+
+// ---------- DetecciÃ³n de articulaciones ----------
+function detectarArticulaciones(g, H) {
+  const pos = g.attributes.position;
+  const banda = H * 0.008;
+  const hueco = H * 0.018;
+
+  // Brazos: alturas donde la rebanada tiene al menos 3 islas (brazo, torso, brazo)
+  const brazos = { I: [], D: [] };
+  let axila = 0;
+  for (let k = 0.4; k <= 0.88; k += 0.005) {
+    const y = k * H;
+    const islas = rebanada(pos, y, banda, hueco);
+    if (islas.length < 3) continue;
+    const izq = islas[0];
+    const der = islas[islas.length - 1];
+    if (izq.centro > -H * 0.08 || der.centro < H * 0.08) continue;
+    brazos.I.push({ x: izq.centro, y, z: izq.z });
+    brazos.D.push({ x: der.centro, y, z: der.z });
+    axila = Math.max(axila, y);
+  }
+  if (!brazos.I.length) axila = H * 0.72;
+
+  // Cuello: la parte mÃ¡s angosta del tronco entre los hombros y la cabeza
+  let cuelloY = H * 0.84;
+  let cuelloZ = 0;
+  let angosto = Infinity;
+  for (let k = 0.78; k <= 0.92; k += 0.004) {
+    const islas = rebanada(pos, k * H, banda, hueco).filter((i) => Math.abs(i.centro) < H * 0.06);
+    if (!islas.length) continue;
+    const isla = islas.reduce((m, i) => (i.n > m.n ? i : m));
+    if (isla.ancho < angosto) {
+      angosto = isla.ancho;
+      cuelloY = k * H;
+      cuelloZ = isla.z;
+    }
+  }
+
+  const art = {};
+  for (const [lado, signo] of [['I', -1], ['D', 1]]) {
+    const pts = brazos[lado].filter((p) => p.y > axila - H * 0.12);
+    const fit = pts.length >= 3 ? ajusteLineal(pts) : { a: signo * H * 0.2, b: 0 };
+    // El hombro queda arriba de la axila (si los brazos se pegan al torso, se estima desde el cuello)
+    const yHombro = Math.max(axila + H * 0.05, cuelloY - H * 0.07);
+    const hombro = new THREE.Vector3((fit.a + fit.b * yHombro) * 0.9, yHombro, 0);
+    const zArriba = pts.length ? pts.reduce((s, p) => s + p.z, 0) / pts.length : 0;
+    hombro.z = zArriba;
+    if (Math.abs(hombro.x) < H * 0.075) hombro.x = signo * H * 0.095;
+    if (Math.abs(hombro.x) > H * 0.14) hombro.x = signo * H * 0.12;
+    // Punta de los dedos: el vÃ©rtice de ese lado mÃ¡s lejano al hombro, entre la cadera y la axila
+    // y bien afuera del torso (asÃ­ nunca agarra los pies)
+    let punta = null;
+    let mejor = 0;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i);
+      const y = pos.getY(i);
+      if (x * signo < Math.abs(hombro.x) + H * 0.04 || y > axila || y < H * 0.3) continue;
+      _v.fromBufferAttribute(pos, i);
+      const d = _v.distanceToSquared(hombro);
+      if (d > mejor) {
+        mejor = d;
+        punta = _v.clone();
+      }
+    }
+    if (!punta) punta = hombro.clone().add(new THREE.Vector3(signo * H * 0.25, -H * 0.35, 0));
+    // Codo y muÃ±eca a lo largo del brazo, con proporciones humanas, corregidos al centro del brazo
+    const enBrazo = (f) => {
+      const p = hombro.clone().lerp(punta, f);
+      let cerca = null;
+      for (const q of brazos[lado]) if (!cerca || Math.abs(q.y - p.y) < Math.abs(cerca.y - p.y)) cerca = q;
+      if (cerca && Math.abs(cerca.y - p.y) < H * 0.015) {
+        p.x = cerca.x;
+        p.z = cerca.z;
+      }
+      return p;
+    };
+    art['hombro' + lado] = hombro;
+    art['codo' + lado] = enBrazo(0.43);
+    art['muneca' + lado] = enBrazo(0.76);
+    art['punta' + lado] = punta;
+    // Nudillos: donde empiezan los dedos (para poder cerrar la mano)
+    art['nudillos' + lado] = art['muneca' + lado].clone().lerp(punta, 0.5);
+  }
+
+  art.cuello = new THREE.Vector3(0, cuelloY - H * 0.03, cuelloZ * 0.6);
+  art.cabeza = new THREE.Vector3(0, cuelloY + H * 0.015, cuelloZ);
+  art.coronilla = new THREE.Vector3(0, H, cuelloZ);
+
+  // Piernas: alturas con dos islas centrales (debajo de la entrepierna o de la pollera)
+  const piernas = { I: [], D: [] };
+  let separacion = 0;
+  for (let k = 0.03; k <= 0.5; k += 0.005) {
+    const y = k * H;
+    const islas = rebanada(pos, y, banda, H * 0.01).filter((i) => Math.abs(i.centro) < H * 0.14);
+    if (islas.length !== 2) continue;
+    piernas.I.push({ x: islas[0].centro, y, z: islas[0].z });
+    piernas.D.push({ x: islas[1].centro, y, z: islas[1].z });
+    separacion = Math.max(separacion, y);
+  }
+  const yCadera = H * 0.52;
+  const yRodilla = H * 0.285;
+  const yTobillo = H * 0.05;
+  let zPelvis = 0;
+  {
+    const islas = rebanada(pos, yCadera, banda, hueco).filter((i) => Math.abs(i.centro) < H * 0.1);
+    if (islas.length) zPelvis = islas[0].z;
+  }
+  for (const [lado, signo] of [['I', -1], ['D', 1]]) {
+    const enPierna = (y, xPorDefecto) => {
+      let cerca = null;
+      for (const q of piernas[lado]) if (!cerca || Math.abs(q.y - y) < Math.abs(cerca.y - y)) cerca = q;
+      return cerca && Math.abs(cerca.y - y) < H * 0.05 ? cerca : { x: xPorDefecto, z: 0 };
+    };
+    const rod = enPierna(yRodilla, signo * H * 0.055);
+    const tob = enPierna(yTobillo + H * 0.02, rod.x);
+    const alto = piernas[lado].length ? piernas[lado][piernas[lado].length - 1] : rod;
+    art['pierna' + lado] = new THREE.Vector3(signo * Math.max(Math.abs(alto.x), H * 0.045), yCadera, zPelvis);
+    art['rodilla' + lado] = new THREE.Vector3(rod.x, yRodilla, rod.z);
+    art['tobillo' + lado] = new THREE.Vector3(tob.x, yTobillo, tob.z);
+    // Punta del pie: el vÃ©rtice mÃ¡s adelantado (-Z) cerca del piso de ese lado
+    let punta = new THREE.Vector3(tob.x, 0.02, tob.z - H * 0.08);
+    for (let i = 0; i < pos.count; i++) {
+      if (pos.getY(i) > H * 0.04 || pos.getX(i) * signo < 0) continue;
+      if (pos.getZ(i) < punta.z) punta = new THREE.Vector3(pos.getX(i), pos.getY(i), pos.getZ(i));
+    }
+    art['pie' + lado] = punta;
+  }
+  art.cadera = new THREE.Vector3(0, yCadera + H * 0.01, zPelvis);
+  art.cintura = new THREE.Vector3(0, yCadera + H * 0.07, zPelvis);
+  // Pollera: las piernas reciÃ©n se separan cerca de las rodillas
+  art.separacionPiernas = separacion || yCadera;
+  art.conPollera = separacion > 0 && separacion < H * 0.4;
+  return art;
+}
+
+// ---------- Esqueleto ----------
+function hueso(nombre, padre, posMundo, posPadreMundo) {
+  const b = new THREE.Bone();
+  b.name = nombre;
+  if (padre) {
+    padre.add(b);
+    padre.updateMatrixWorld(true);
+    b.position.copy(padre.worldToLocal(posMundo.clone()));
+  } else b.position.copy(posMundo).sub(posPadreMundo ?? new THREE.Vector3());
+  b.updateMatrixWorld(true);
+  return b;
+}
+
+// Orienta un hueso para que su -Y local apunte hacia "objetivo" (en mundo)
+function apuntar(b, objetivo) {
+  const desde = b.getWorldPosition(_a);
+  const dir = _b.subVectors(objetivo, desde).normalize();
+  const qMundo = new THREE.Quaternion().setFromUnitVectors(ABAJO, dir);
+  const qPadre = b.parent.getWorldQuaternion(new THREE.Quaternion());
+  b.quaternion.copy(qPadre.invert().multiply(qMundo));
+  b.updateMatrixWorld(true);
+}
+
+function crearEsqueleto(raiz, art, dedos) {
+  const cero = new THREE.Vector3();
+  const cadera = hueso('cadera', null, art.cadera, cero);
+  raiz.add(cadera);
+  cadera.updateMatrixWorld(true);
+  const torso = hueso('torso', cadera, art.cadera);
+  const cuello = hueso('cuello', torso, art.cuello);
+  const cabeza = hueso('cabeza', cuello, art.cabeza);
+  cabeza.rotation.order = 'YXZ';
+  const rig = { cadera, torso, cuello, cabeza };
+  for (const lado of ['I', 'D']) {
+    const hombro = hueso('hombro' + lado, torso, art['hombro' + lado]);
+    apuntar(hombro, art['codo' + lado]);
+    const codo = hueso('codo' + lado, hombro, art['codo' + lado]);
+    apuntar(codo, art['muneca' + lado]);
+    const muneca = hueso('muneca' + lado, codo, art['muneca' + lado]);
+    const mano = hueso('mano' + lado, muneca, art['muneca' + lado]);
+    // Dedos articulados (si se pudieron detectar en la malla); si no, la mano queda rÃ­gida
+    const dedosHuesos = dedos?.[lado] ? crearHuesosDedos(mano, dedos[lado], lado) : null;
+    rig['brazo' + lado] = { hombro, codo, muneca, manoModelo: mano, dedosHuesos, dedos: [] };
+    const pierna = hueso('pierna' + lado, cadera, art['pierna' + lado]);
+    const rodilla = hueso('rodilla' + lado, pierna, art['rodilla' + lado]);
+    const tobillo = hueso('tobillo' + lado, rodilla, art['tobillo' + lado]);
+    rig['pierna' + lado] = pierna;
+    rig['rodilla' + lado] = rodilla;
+    rig['tobillo' + lado] = tobillo;
+  }
+  return rig;
+}
+
+// ---------- Pesos de piel ----------
+function distSegmento(p, a, b) {
+  const ab = _b.subVectors(b, a);
+  const t = THREE.MathUtils.clamp(_a.subVectors(p, a).dot(ab) / Math.max(1e-9, ab.lengthSq()), 0, 1);
+  return p.distanceTo(_a.copy(a).addScaledVector(ab, t));
+}
+
+function calcularPesos(g, art, rig, huesos, H, dedos) {
+  const pos = g.attributes.position;
+  const idx = (b) => huesos.indexOf(b);
+  // Segmentos de influencia: [hueso, desde, hasta, radio, zona]
+  const segs = [
+    [rig.cadera, new THREE.Vector3(0, art.separacionPiernas * 0.5 + art.cadera.y * 0.5, art.cadera.z), art.cintura, H * 0.075, 'tronco'],
+    [rig.torso, art.cintura, art.cuello.clone().setY(art.cuello.y - H * 0.04), H * 0.085, 'tronco'],
+    [rig.cuello, art.cuello, art.cabeza, H * 0.035, 'cuello'],
+    [rig.cabeza, art.cabeza.clone().setY(art.cabeza.y + H * 0.03), art.coronilla.clone().setY(H * 0.96), H * 0.06, 'cabeza'],
+  ];
+  for (const [lado, signo] of [['I', -1], ['D', 1]]) {
+    const br = rig['brazo' + lado];
+    segs.push([br.hombro, art['hombro' + lado], art['codo' + lado], H * 0.028, 'brazo', signo]);
+    segs.push([br.codo, art['codo' + lado], art['muneca' + lado], H * 0.024, 'brazo', signo]);
+    segs.push([br.manoModelo, art['muneca' + lado], art['punta' + lado], H * 0.025, 'brazo', signo]);
+    segs.push([rig['pierna' + lado], art['pierna' + lado], art['rodilla' + lado], H * 0.045, 'pierna', signo]);
+    segs.push([rig['rodilla' + lado], art['rodilla' + lado], art['tobillo' + lado], H * 0.032, 'pierna', signo]);
+    segs.push([rig['tobillo' + lado], art['tobillo' + lado], art['pie' + lado], H * 0.03, 'pierna', signo]);
+  }
+  const n = pos.count;
+  const indices = new Uint16Array(n * 4);
+  const pesos = new Float32Array(n * 4);
+  const p = new THREE.Vector3();
+  const xHombro = Math.min(Math.abs(art.hombroI.x), Math.abs(art.hombroD.x));
+  const cand = [];
+  for (let i = 0; i < n; i++) {
+    p.fromBufferAttribute(pos, i);
+    cand.length = 0;
+    for (const [b, a, z, r, zona, signo] of segs) {
+      // Reglas por zona: evitan que la mano "arrastre" el muslo o la cabeza el hombro, etc.
+      if (zona === 'brazo' && (p.x * signo < xHombro * 0.55 || p.y > art.cabeza.y)) continue;
+      if (zona === 'pierna' && (p.y > art.cintura.y || p.x * signo < -H * 0.02)) continue;
+      if (zona === 'cabeza' && p.y < art.cuello.y) continue;
+      if (zona === 'cuello' && (p.y < art.cuello.y - H * 0.05 || p.y > art.cabeza.y + H * 0.06)) continue;
+      const d = distSegmento(p, a, z) / r;
+      cand.push([idx(b), 1 / (Math.pow(d, 5) + 1e-4), zona]);
+    }
+    cand.sort((c1, c2) => c2[1] - c1[1]);
+    // Pollera / entrepierna: mezcla con la cadera para que la tela no se rompa al caminar
+    // (sÃ³lo si lo que domina es una pierna: antes se mezclaba tambiÃ©n en las manos, que en pose A
+    // quedan a la altura de la pelvis, y al mover los brazos se estiraban hacia la cintura)
+    if (p.y > art.separacionPiernas - H * 0.02 && p.y < art.cintura.y && cand[0]?.[2] === 'pierna' && Math.abs(p.x) < H * 0.2) {
+      const mezcla = art.conPollera ? 0.55 : 0.3;
+      const total = cand.slice(0, 4).reduce((s, c) => s + c[1], 0);
+      for (const c of cand) c[1] = (c[1] / total) * (1 - mezcla);
+      const cad = cand.find((c) => c[0] === idx(rig.cadera));
+      if (cad) cad[1] += mezcla;
+      else cand.push([idx(rig.cadera), mezcla, 'tronco']);
+      cand.sort((c1, c2) => c2[1] - c1[1]);
+    }
+    let total = 0;
+    for (let k = 0; k < 4 && k < cand.length; k++) total += cand[k][1];
+    for (let k = 0; k < 4; k++) {
+      if (k < cand.length) {
+        indices[i * 4 + k] = cand[k][0];
+        pesos[i * 4 + k] = cand[k][1] / total;
+      }
+    }
+  }
+  g.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(indices, 4));
+  g.setAttribute('skinWeight', new THREE.Float32BufferAttribute(pesos, 4));
+
+  // Dedos: reparten el peso de la mano entre las tres falanges de cada dedo
+  for (const lado of ['I', 'D']) {
+    const det = dedos?.[lado];
+    const br = rig['brazo' + lado];
+    if (det && br.dedosHuesos) pesosDedos(g, det, br.dedosHuesos, idx, br.manoModelo, det.largo);
+  }
+}
+
+// Normales promediadas por posiciÃ³n: el contorno no se abre en las costuras de la textura
+function normalesSuaves(g) {
+  const pos = g.attributes.position;
+  const nor = g.attributes.normal;
+  const mapa = new Map();
+  const clave = (i) => `${Math.round(pos.getX(i) * 2000)},${Math.round(pos.getY(i) * 2000)},${Math.round(pos.getZ(i) * 2000)}`;
+  for (let i = 0; i < pos.count; i++) {
+    const k = clave(i);
+    const acc = mapa.get(k) ?? [0, 0, 0];
+    acc[0] += nor.getX(i); acc[1] += nor.getY(i); acc[2] += nor.getZ(i);
+    mapa.set(k, acc);
+  }
+  const datos = new Float32Array(pos.count * 3);
+  for (let i = 0; i < pos.count; i++) {
+    const acc = mapa.get(clave(i));
+    _v.set(acc[0], acc[1], acc[2]).normalize();
+    datos.set([_v.x, _v.y, _v.z], i * 3);
+  }
+  return new THREE.BufferAttribute(datos, 3);
+}
+
+// Material de contorno que se infla DESPUÃ‰S del skinning (sigue al cuerpo animado)
+const cacheContorno = new Map();
+export function materialContornoPiel(grosor, color = COLOR_CONTORNO) {
+  const clave = `${grosor.toFixed(4)}-${color}`;
+  if (cacheContorno.has(clave)) return cacheContorno.get(clave);
+  const m = new THREE.MeshBasicMaterial({ color, side: THREE.BackSide });
+  m.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <skinning_vertex>',
+      `#include <skinning_vertex>\n  transformed += normalize(objectNormal) * ${grosor.toFixed(4)};`,
+    );
+  };
+  m.customProgramCacheKey = () => `contornoPiel${grosor.toFixed(4)}-${color}`;
+  cacheContorno.set(clave, m);
+  return m;
+}
+
+// ---------- PreparaciÃ³n (se hace una sola vez por modelo) ----------
+// Normalizar la malla, detectar articulaciones y dedos y calcular los pesos de piel cuesta unos
+// 200 ms por modelo. Como en el aula hay muchos personajes que comparten modelo, todo eso se
+// guarda: cada personaje sÃ³lo arma su propio esqueleto y comparte la geometrÃ­a.
+const cachePreparados = new Map();
+
+// Deja sÃ³lo la parte de arriba del cuerpo (cintura, torso, brazos y cabeza): para los alumnos de
+// fondo, sentados detrÃ¡s del banco, no hace falta dibujar las piernas.
+function recortarTorso(g, art, H) {
+  const pos = g.attributes.position;
+  const corte = art.cadera.y - H * 0.025;
+  const viejo = g.index.array;
+  const nuevo = [];
+  for (let i = 0; i < viejo.length; i += 3) {
+    const yMax = Math.max(pos.getY(viejo[i]), pos.getY(viejo[i + 1]), pos.getY(viejo[i + 2]));
+    if (yMax >= corte) nuevo.push(viejo[i], viejo[i + 1], viejo[i + 2]);
+  }
+  g.setIndex(new THREE.BufferAttribute(new Uint32Array(nuevo), 1));
+}
+
+function preparar(escena, cfg) {
+  const clave = `${cfg.ruta}|${cfg.altura}|${cfg.rotacionY ?? 0}|${cfg.soloTorso ? 'torso' : 'completo'}`;
+  const guardado = cachePreparados.get(clave);
+  if (guardado) return guardado;
+
+  const H = cfg.altura;
+  const { geometria: g, material: original } = geometriaNormalizada(escena, cfg);
+  const art = detectarArticulaciones(g, H);
+
+  const dedos = {};
+  for (const lado of ['I', 'D']) {
+    const diag = [];
+    dedos[lado] = detectarDedos(g.attributes.position, art, lado, H, diag);
+    if (!dedos[lado]) console.warn(`${cfg.ruta}: no se pudieron detectar los dedos (${lado}): ${diag.join('; ')}. La mano queda rÃ­gida.`);
+  }
+
+  // Esqueleto temporal: fija el orden de los huesos y permite calcular los pesos una Ãºnica vez
+  const temporal = new THREE.Group();
+  const rigTmp = crearEsqueleto(temporal, art, dedos);
+  const huesosTmp = [];
+  rigTmp.cadera.traverse((o) => o.isBone && huesosTmp.push(o));
+  calcularPesos(g, art, rigTmp, huesosTmp, H, dedos);
+
+  // Regiones de pelo y remera (para recolorear); si falla, el modelo queda con sus colores
+  let regiones = null;
+  try {
+    regiones = clasificarRegiones(g, art, H, crearMuestreador(original.map));
+    if (regiones) g.setAttribute('region', regiones.region);
+  } catch (e) {
+    console.warn(`${cfg.ruta}: no se pudieron clasificar pelo y remera.`, e);
+  }
+
+  if (cfg.soloTorso) recortarTorso(g, art, H);
+
+  // Contorno: misma piel y esqueleto, con normales suaves
+  const gc = new THREE.BufferGeometry();
+  gc.setIndex(g.index);
+  for (const nombre of ['position', 'skinIndex', 'skinWeight']) gc.setAttribute(nombre, g.attributes[nombre]);
+  gc.setAttribute('normal', normalesSuaves(g));
+
+  const listo = { g, gc, art, dedos, original, H, regiones, nHuesos: huesosTmp.length };
+  cachePreparados.set(clave, listo);
+  return listo;
+}
+
+/**
+ * Crea el personaje con esqueleto a partir de la escena de un GLB estÃ¡tico.
+ * Devuelve { rig, malla, contorno, articulaciones, esqueleto, manos } y agrega todo a "raiz".
+ */
+export function autoRig(raiz, escena, cfg) {
+  const { g, gc, art, dedos, original, regiones } = preparar(escena, cfg);
+
+  // El esqueleto se arma con la raÃ­z en el origen (pose de atadura)
+  const posRaiz = raiz.position.clone();
+  const rotRaiz = raiz.rotation.clone();
+  const escRaiz = raiz.scale.clone();
+  raiz.position.set(0, 0, 0);
+  raiz.rotation.set(0, 0, 0);
+  raiz.scale.set(1, 1, 1);
+  raiz.updateMatrixWorld(true);
+
+  const rig = crearEsqueleto(raiz, art, dedos);
+  const huesos = [];
+  rig.cadera.traverse((o) => o.isBone && huesos.push(o));
+
+  const mapa = original.map ?? null;
+  const mat = new THREE.MeshToonMaterial({ map: mapa, color: mapa ? 0xffffff : original.color, gradientMap: RAMPA });
+  // Pelo y remera de otro color (cfg.pelo / cfg.remera, en hex); el resto del modelo queda igual
+  if (regiones && (cfg.pelo != null || cfg.remera != null)) {
+    const u = prepararRecolor(mat, regiones.lumaPelo, regiones.lumaRemera);
+    if (cfg.pelo != null) {
+      u.uColorPelo.value.set(cfg.pelo);
+      u.uUsaPelo.value = 1;
+    }
+    if (cfg.remera != null) {
+      u.uColorRemera.value.set(cfg.remera);
+      u.uUsaRemera.value = 1;
+    }
+  }
+  const malla = new THREE.SkinnedMesh(g, mat);
+  malla.castShadow = true;
+  malla.receiveShadow = true;
+  malla.frustumCulled = false;
+  raiz.add(malla);
+
+  const grosor = cfg.contorno ?? 0.011;
+  const contorno = new THREE.SkinnedMesh(gc, materialContornoPiel(grosor));
+  contorno.userData.esContorno = true;
+  contorno.userData.materialResaltado = materialContornoPiel(grosor * 1.3, 0xffd84a);
+  contorno.frustumCulled = false;
+  contorno.castShadow = false;
+  contorno.raycast = () => {};
+  raiz.add(contorno);
+
+  raiz.updateMatrixWorld(true);
+  const esqueleto = new THREE.Skeleton(huesos);
+  malla.bind(esqueleto);
+  contorno.bind(esqueleto);
+
+  // Pose canÃ³nica: brazos colgando (rotaciÃ³n 0, como el placeholder), resto como el modelo
+  for (const lado of ['I', 'D']) {
+    rig['brazo' + lado].hombro.rotation.set(0, 0, 0);
+    rig['brazo' + lado].codo.rotation.set(0, 0, 0);
+  }
+
+  // Control de los dedos (relajados por defecto); null si no se detectaron en la malla
+  const manos = dedos.I && dedos.D ? new Manos({ I: rig.brazoI.dedosHuesos, D: rig.brazoD.dedosHuesos }) : null;
+
+  raiz.position.copy(posRaiz);
+  raiz.rotation.copy(rotRaiz);
+  raiz.scale.copy(escRaiz);
+  return { rig, malla, contorno, articulaciones: art, esqueleto, manos };
+}
+=== src/characters/Manos.js ===
+import * as THREE from 'three';
+
+/**
+ * Manos con dedos articulados para los modelos con auto-rig.
+ *
+ * Los GLB traen la mano como un bloque: cuatro dedos rectos y un pulgar, todo pegado a un solo
+ * hueso. AcÃ¡ se detectan los dedos en la malla y se arma, por mano, un esqueleto de
+ *   pulgar (3 huesos) + Ã­ndice, medio, anular y meÃ±ique (3 huesos cada uno)
+ * colgado del hueso "mano". Con eso la mano puede quedar relajada, hacer puÃ±o, seÃ±alar,
+ * agarrar una lapicera o mostrar de 1 a 4 dedos (las seÃ±as de Sofi) sin manos "postizas".
+ *
+ * ConvenciÃ³n (igual que el resto del rig): los huesos de los dedos nacen con la orientaciÃ³n
+ * del antebrazo; el eje Z local es el eje de flexiÃ³n (los dedos se cierran hacia la palma).
+ */
+
+export const DEDOS = ['pulgar', 'indice', 'medio', 'anular', 'menique'];
+
+const _a = new THREE.Vector3();
+const _b = new THREE.Vector3();
+const _c = new THREE.Vector3();
+
+// ---------- DetecciÃ³n ----------
+
+/**
+ * Detecta los dedos de UNA mano en la geometrÃ­a normalizada (mirando a -Z, pose A).
+ * Devuelve null si la mano no tiene la forma esperada (en ese caso se usa el modo viejo).
+ *   art  articulaciones de detectarArticulaciones()
+ *   lado 'I' | 'D'
+ * Resultado: { dedos: [{ nombre, puntos:[p0,p1,p2,p3] }], eje, largo }
+ *   p0 = nudillo (base del dedo), p3 = punta; p1 y p2 son las articulaciones intermedias.
+ */
+export function detectarDedos(pos, art, lado, H, diag = []) {
+  const signo = lado === 'I' ? -1 : 1;
+  const mu = art['muneca' + lado];
+  const pu = art['punta' + lado];
+  const hombro = art['hombro' + lado];
+  const u = new THREE.Vector3().subVectors(pu, mu);
+  const L = u.length();
+  if (L < H * 0.05) return diag.push('mano demasiado corta'), null;
+  u.normalize();
+
+  // VÃ©rtices de la mano: pasada la muÃ±eca, cerca del eje y del lado correcto
+  const xMin = Math.abs(hombro.x) * 0.55;
+  const mano = [];
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    if (x * signo < xMin) continue;
+    _a.fromBufferAttribute(pos, i).sub(mu);
+    const t = _a.dot(u);
+    if (t < 0.05 * L || t > 1.08 * L) continue;
+    const radial = _b.copy(_a).addScaledVector(u, -t).length();
+    if (radial > 0.62 * L) continue;
+    mano.push({ i, t: t / L, c: _a.z, p: new THREE.Vector3().fromBufferAttribute(pos, i) });
+  }
+  if (mano.length < 60) return diag.push(`pocos vÃ©rtices de mano (${mano.length})`), null;
+
+  // Puntas de los cuatro dedos largos: k-means (k = 4) sobre la coordenada transversal (z)
+  // de los vÃ©rtices de la franja distal. El pulgar no llega hasta ahÃ­.
+  const distal = mano.filter((q) => q.t > 0.74);
+  if (distal.length < 20) return diag.push(`pocos vÃ©rtices en la franja de puntas (${distal.length})`), null;
+  const cs = distal.map((q) => q.c).sort((x, y) => x - y);
+  let centros = [0.125, 0.375, 0.625, 0.875].map((f) => cs[Math.floor(f * (cs.length - 1))]);
+  let grupo = new Array(distal.length).fill(0);
+  for (let it = 0; it < 25; it++) {
+    distal.forEach((q, n) => {
+      let mejor = 0;
+      for (let k = 1; k < 4; k++) if (Math.abs(q.c - centros[k]) < Math.abs(q.c - centros[mejor])) mejor = k;
+      grupo[n] = mejor;
+    });
+    const suma = [0, 0, 0, 0];
+    const cant = [0, 0, 0, 0];
+    distal.forEach((q, n) => {
+      suma[grupo[n]] += q.c;
+      cant[grupo[n]]++;
+    });
+    for (let k = 0; k < 4; k++) if (cant[k]) centros[k] = suma[k] / cant[k];
+  }
+  // Ordenados de adelante (-z, junto al pulgar) hacia atrÃ¡s: Ã­ndice, medio, anular, meÃ±ique
+  const orden = [0, 1, 2, 3].sort((x, y) => centros[x] - centros[y]);
+  const largos = [0.4, 0.43, 0.4, 0.33]; // largo de cada dedo respecto del largo de la mano
+
+  const dedos = [];
+  const puntaDe = (miembros) => {
+    // punta = promedio de los vÃ©rtices mÃ¡s lejanos del grupo
+    const ord = [...miembros].sort((q1, q2) => q2.t - q1.t);
+    const n = Math.max(3, Math.min(8, Math.floor(ord.length * 0.15)));
+    const p = new THREE.Vector3();
+    for (let k = 0; k < n; k++) p.add(ord[k].p);
+    return p.multiplyScalar(1 / n);
+  };
+  for (let f = 0; f < 4; f++) {
+    const miembros = distal.filter((_, n) => grupo[n] === orden[f]);
+    if (miembros.length < 3) return diag.push(`dedo ${f + 1} sin vÃ©rtices`), null;
+    const punta = puntaDe(miembros);
+    const largo = Math.max(L * 0.28, Math.min(L * 0.6, punta.distanceTo(mu) * largos[f]));
+    const dir = _c.subVectors(punta, mu).normalize();
+    const base = punta.clone().addScaledVector(dir, -largo);
+    const j1 = base.clone().lerp(punta, 0.4);
+    const j2 = base.clone().lerp(punta, 0.72);
+    dedos.push({ nombre: DEDOS[f + 1], puntos: [base, j1, j2, punta.clone()] });
+  }
+
+  // Pulgar: vÃ©rtices adelante (-z) del eje del Ã­ndice, sin llegar a la franja de las puntas
+  const indice = dedos[0];
+  const tIndice = _a.subVectors(indice.puntos[3], mu).dot(u) / L;
+  const cIndice = indice.puntos[3].z - mu.z;
+  const anchoDedo = Math.abs(centros[orden[1]] - centros[orden[0]]) || L * 0.12;
+  const pulgarPts = mano.filter((q) => q.t < 0.8 && q.c < cIndice * (q.t / Math.max(0.3, tIndice)) - anchoDedo * 0.6);
+  if (pulgarPts.length < 15) return diag.push(`pulgar sin vÃ©rtices (${pulgarPts.length})`), null;
+  // La punta del pulgar: el extremo mÃ¡s adelantado (-z) y largo del conjunto
+  const ranking = pulgarPts
+    .filter((q) => q.t > 0.3)
+    .map((q) => ({ q, v: -q.c / L + 0.35 * q.t }))
+    .sort((x, y) => y.v - x.v);
+  if (ranking.length < 6) return diag.push('pulgar sin punta'), null;
+  const punta = new THREE.Vector3();
+  for (let k = 0; k < 6; k++) punta.add(ranking[k].q.p);
+  punta.multiplyScalar(1 / 6);
+  const tp = punta.clone();
+  const baseP = mu.clone().lerp(tp, 0.3);
+  dedos.unshift({
+    nombre: 'pulgar',
+    puntos: [baseP, baseP.clone().lerp(tp, 0.42), baseP.clone().lerp(tp, 0.74), tp],
+  });
+
+  return { dedos, eje: u, largo: L, mano };
+}
+
+// ---------- Esqueleto ----------
+
+/** Crea los huesos de los dedos de una mano. Devuelve { pulgar: [h1,h2,h3], indice: [...], ... }. */
+export function crearHuesosDedos(manoHueso, deteccion, lado) {
+  const huesos = {};
+  manoHueso.updateMatrixWorld(true);
+  for (const d of deteccion.dedos) {
+    const cadena = [];
+    let padre = manoHueso;
+    for (let k = 0; k < 3; k++) {
+      const b = new THREE.Bone();
+      b.name = `${d.nombre}${k + 1}${lado}`;
+      padre.add(b);
+      padre.updateMatrixWorld(true);
+      b.position.copy(padre.worldToLocal(d.puntos[k].clone()));
+      b.updateMatrixWorld(true);
+      cadena.push(b);
+      padre = b;
+    }
+    huesos[d.nombre] = cadena;
+  }
+  return huesos;
+}
+
+// ---------- Pesos ----------
+
+function distSeg(p, a, b, salida) {
+  const ab = _b.subVectors(b, a);
+  const t = THREE.MathUtils.clamp(_a.subVectors(p, a).dot(ab) / Math.max(1e-9, ab.lengthSq()), 0, 1);
+  const q = _c.copy(a).addScaledVector(ab, t);
+  if (salida) salida.t = t;
+  return p.distanceTo(q);
+}
+
+const suave = (x) => {
+  const t = THREE.MathUtils.clamp(x, 0, 1);
+  return t * t * (3 - 2 * t);
+};
+
+/**
+ * Sobrescribe los pesos de piel de los vÃ©rtices de los dedos.
+ *   deteccion   resultado de detectarDedos()
+ *   huesosDedos resultado de crearHuesosDedos()
+ *   indiceHueso (hueso) => Ã­ndice en el esqueleto
+ *   manoHueso   hueso "mano" (para la uniÃ³n con la palma)
+ */
+export function pesosDedos(g, deteccion, huesosDedos, indiceHueso, manoHueso, L) {
+  const pos = g.attributes.position;
+  const idx = g.attributes.skinIndex;
+  const pes = g.attributes.skinWeight;
+  const p = new THREE.Vector3();
+  const aux = { t: 0 };
+  const manoIdx = indiceHueso(manoHueso);
+  const radio = L * 0.2; // ancho mÃ¡ximo de un dedo (desde su eje)
+  let tocados = 0;
+  for (const q of deteccion.mano) {
+    p.fromBufferAttribute(pos, q.i);
+    // dedo mÃ¡s cercano (distancia al segmento nudillo-punta, normalizada por el grosor)
+    let mejor = null;
+    let mejorD = Infinity;
+    for (const d of deteccion.dedos) {
+      const grosor = d.nombre === 'pulgar' ? radio * 1.25 : radio * 0.8;
+      const dist = distSeg(p, d.puntos[0], d.puntos[3], aux) / grosor;
+      if (dist < mejorD) {
+        mejorD = dist;
+        mejor = { d, s: aux.t };
+      }
+    }
+    if (!mejor || mejorD > 1.15) continue;
+    // s: 0 en el nudillo, 1 en la punta. Para vÃ©rtices antes del nudillo no hay proyecciÃ³n
+    // negativa (clamp), asÃ­ que se mira tambiÃ©n la posiciÃ³n a lo largo del eje de la mano.
+    const d = mejor.d;
+    const cadena = huesosDedos[d.nombre];
+    const ab = _b.subVectors(d.puntos[3], d.puntos[0]);
+    const sReal = _a.subVectors(p, d.puntos[0]).dot(ab) / Math.max(1e-9, ab.lengthSq());
+    const w1 = 1 - suave((sReal - 0.4 + 0.1) / 0.2); // falange proximal
+    const w3 = suave((sReal - 0.72 + 0.1) / 0.2); // falange distal
+    let wProx = w1;
+    let wDist = w3;
+    let wMed = Math.max(0, 1 - wProx - wDist);
+    // uniÃ³n con la palma: antes y alrededor del nudillo se mezcla con la mano
+    const wPalma = 1 - suave((sReal + 0.1) / 0.28);
+    const resto = 1 - wPalma;
+    wProx *= resto;
+    wMed *= resto;
+    wDist *= resto;
+    const lista = [
+      [manoIdx, wPalma],
+      [indiceHueso(cadena[0]), wProx],
+      [indiceHueso(cadena[1]), wMed],
+      [indiceHueso(cadena[2]), wDist],
+    ];
+    let total = 0;
+    for (const [, w] of lista) total += w;
+    if (total < 1e-6) continue;
+    for (let k = 0; k < 4; k++) {
+      idx.setComponent(q.i, k, lista[k][0]);
+      pes.setComponent(q.i, k, lista[k][1] / total);
+    }
+    tocados++;
+  }
+  return tocados;
+}
+
+// ---------- Poses de mano ----------
+// Cada pose da, por dedo, la flexiÃ³n de las tres falanges [prox, medial, distal] en radianes
+// (positivo = hacia la palma) y la apertura lateral del dedo ("abrir", en radianes).
+
+const reposo = {
+  pulgar: { f: [0.18, 0.25, 0.2], abrir: 0.0, cruzar: 0.2 },
+  indice: { f: [0.22, 0.34, 0.2], abrir: -0.03 },
+  medio: { f: [0.3, 0.42, 0.24], abrir: 0.0 },
+  anular: { f: [0.38, 0.48, 0.28], abrir: 0.03 },
+  menique: { f: [0.46, 0.52, 0.3], abrir: 0.07 },
+};
+const puno = {
+  pulgar: { f: [0.35, 0.5, 0.45], abrir: 0.0, cruzar: 0.75 },
+  indice: { f: [1.35, 1.55, 1.0], abrir: 0 },
+  medio: { f: [1.4, 1.6, 1.0], abrir: 0 },
+  anular: { f: [1.45, 1.6, 1.0], abrir: 0 },
+  menique: { f: [1.5, 1.6, 1.0], abrir: 0 },
+};
+const recta = (abrir = 0.08) => ({
+  pulgar: { f: [0.05, 0.05, 0.05], abrir: 0.35, cruzar: 0.0 },
+  indice: { f: [0.02, 0.02, 0.02], abrir: -abrir },
+  medio: { f: [0.02, 0.02, 0.02], abrir: -abrir * 0.25 },
+  anular: { f: [0.02, 0.02, 0.02], abrir: abrir * 0.5 },
+  menique: { f: [0.02, 0.02, 0.02], abrir: abrir * 1.4 },
+});
+
+export const POSES_MANO = {
+  reposo,
+  puno,
+  abierta: recta(0.12),
+  plana: {
+    ...recta(0.04),
+    pulgar: { f: [0.08, 0.1, 0.08], abrir: 0.15, cruzar: 0.1 },
+  },
+  // SeÃ±alar: Ã­ndice estirado, el resto cerrado
+  senalar: {
+    ...puno,
+    indice: { f: [0.02, 0.03, 0.02], abrir: -0.02 },
+    pulgar: { f: [0.2, 0.3, 0.25], abrir: 0.1, cruzar: 0.5 },
+  },
+  // Agarrar la lapicera: pinza entre pulgar e Ã­ndice, el resto recogido
+  lapicera: {
+    pulgar: { f: [0.35, 0.45, 0.3], abrir: -0.05, cruzar: 0.75 },
+    indice: { f: [0.55, 0.7, 0.35], abrir: 0.0 },
+    medio: { f: [0.95, 1.05, 0.6], abrir: 0.02 },
+    anular: { f: [1.15, 1.25, 0.75], abrir: 0.04 },
+    menique: { f: [1.25, 1.3, 0.8], abrir: 0.07 },
+  },
+  // Sostener un papelito: pinza mÃ¡s cerrada
+  pinza: {
+    pulgar: { f: [0.22, 0.28, 0.2], abrir: 0.12, cruzar: 0.45 },
+    indice: { f: [0.42, 0.48, 0.25], abrir: -0.02 },
+    medio: { f: [0.52, 0.62, 0.35], abrir: 0.01 },
+    anular: { f: [0.62, 0.72, 0.42], abrir: 0.03 },
+    menique: { f: [0.72, 0.8, 0.48], abrir: 0.06 },
+  },
+  // Mano que espera atrapar algo: abierta y un poco cÃ³ncava
+  atrapar: {
+    pulgar: { f: [0.1, 0.15, 0.1], abrir: 0.3, cruzar: 0.1 },
+    indice: { f: [0.25, 0.3, 0.15], abrir: -0.1 },
+    medio: { f: [0.28, 0.32, 0.15], abrir: -0.03 },
+    anular: { f: [0.3, 0.34, 0.16], abrir: 0.05 },
+    menique: { f: [0.34, 0.36, 0.18], abrir: 0.13 },
+  },
+};
+
+/** Pose de seÃ±as: se estiran los primeros n dedos (1 = Ã­ndice â€¦ 4 = meÃ±ique), el resto en puÃ±o. */
+export function poseSenia(n) {
+  const base = {};
+  const abiertos = ['indice', 'medio', 'anular', 'menique'];
+  const separacion = { indice: -0.1, medio: -0.01, anular: 0.09, menique: 0.21 }; // bien abiertos para contar
+  for (const [nombre, def] of Object.entries(POSES_MANO.puno)) base[nombre] = def;
+  abiertos.forEach((nombre, i) => {
+    if (i < n) base[nombre] = { f: [0.02, 0.02, 0.02], abrir: separacion[nombre] };
+  });
+  base.pulgar = { f: [0.3, 0.45, 0.4], abrir: 0.0, cruzar: 0.85 };
+  return base;
+}
+
+// ---------- Controlador ----------
+
+/**
+ * Mueve los huesos de los dedos de un personaje con suavizado. Se crea una vez por personaje con modelo.
+ *   huesos: { I: { pulgar: [..3], indice: [..3], ... }, D: {...} }
+ */
+export class Manos {
+  constructor(huesos) {
+    this.huesos = huesos;
+    this.estado = { I: this.copiar(POSES_MANO.reposo), D: this.copiar(POSES_MANO.reposo) };
+    this.objetivo = { I: POSES_MANO.reposo, D: POSES_MANO.reposo };
+    this.forzada = { I: null, D: null };
+    this.velocidad = 14;
+    this.aplicar(0, true);
+  }
+
+  copiar(pose) {
+    const r = {};
+    for (const [nombre, d] of Object.entries(pose)) r[nombre] = { f: [...d.f], abrir: d.abrir ?? 0, cruzar: d.cruzar ?? 0 };
+    return r;
+  }
+
+  /** Pose de mano asociada a la pose del brazo (se ignora mientras haya una pose forzada). */
+  pose(lado, nombre) {
+    this.objetivo[lado] = POSES_MANO[nombre] ?? POSES_MANO.reposo;
+  }
+
+  /** Fuerza una pose (por ejemplo las seÃ±as); con null se vuelve a la pose del brazo. */
+  forzar(lado, pose) {
+    this.forzada[lado] = pose;
+  }
+
+  update(dt) {
+    this.aplicar(dt, false);
+  }
+
+  aplicar(dt, inmediato) {
+    const k = inmediato ? 1 : 1 - Math.exp(-this.velocidad * dt);
+    for (const lado of ['I', 'D']) {
+      const meta = this.forzada[lado] ?? this.objetivo[lado];
+      const actual = this.estado[lado];
+      // ConvenciÃ³n de signo: derecha cierra con z negativo, izquierda con z positivo
+      const signo = lado === 'D' ? -1 : 1;
+      for (const nombre of DEDOS) {
+        const cadena = this.huesos[lado][nombre];
+        if (!cadena) continue;
+        const m = meta[nombre] ?? POSES_MANO.reposo[nombre];
+        const a = actual[nombre];
+        for (let i = 0; i < 3; i++) a.f[i] += (m.f[i] - a.f[i]) * k;
+        a.abrir += ((m.abrir ?? 0) - a.abrir) * k;
+        a.cruzar += ((m.cruzar ?? 0) - a.cruzar) * k;
+        for (let i = 0; i < 3; i++) {
+          if (nombre === 'pulgar') {
+            // El pulgar se cierra cruzando la palma: flexiÃ³n (z) + giro hacia los dedos (x)
+            cadena[i].rotation.set(i === 0 ? -a.cruzar : -a.cruzar * 0.25, 0, signo * a.f[i]);
+          } else {
+            cadena[i].rotation.set(0, 0, signo * a.f[i]);
+          }
+        }
+        // apertura lateral en la primera falange (rotaciÃ³n alrededor del eje de la palma)
+        if (nombre !== 'pulgar') cadena[0].rotation.x = a.abrir;
+        else cadena[0].rotation.y = signo * a.abrir;
+      }
+    }
+  }
+}
+=== src/characters/config.js ===
+// ConfiguraciÃ³n visual de todos los personajes.
+//
+// Modelos 3D: agregÃ¡ a la entrada  modelo: { ruta, altura, rotacionY, piel }.
+// El modelo puede ser una malla estÃ¡tica en pose A o T (como las que exportan los generadores de
+// personajes): al cargarlo se le arma un esqueleto por cÃ³digo (characters/AutoRig.js) con las mismas
+// articulaciones que el placeholder, asÃ­ camina, se sienta y hace seÃ±as sin tocar la lÃ³gica.
+// Si el archivo no carga, queda el placeholder hecho con primitivas (los demÃ¡s campos).
+//   ruta       archivo en public/modelos/
+//   altura     altura del personaje parado, en metros
+//   rotacionY  giro para que mire hacia -Z (los generadores suelen exportar mirando a +Z: Math.PI)
+//   piel       color de la mano "de seÃ±as" que reemplaza a la del modelo mientras muestra dedos
+//   alturaCadera  (sentados) altura de la cadera sobre el piso
+//   rig: false    usa el modo viejo: malla rÃ­gida que sÃ³lo se balancea
+// Para optimizar un modelo nuevo (polÃ­gonos y texturas): herramientas/optimizar-modelos.mjs
+
+export const PIELES = [0xf1c9a5, 0xe0ac84, 0xc68d62, 0x9c6b47, 0xf6d7bd];
+
+export const PERSONAJES = {
+  // Jugador: sÃ³lo se ven antebrazos y manos
+  // (en el aula la cabeza no se dibuja: la cÃ¡mara estÃ¡ en sus ojos; en la intro se ve entero)
+  protagonista: {
+    tipo: 'placeholder',
+    postura: 'sentado',
+    soloBrazos: true,
+    buzo: 0xf4f4f2,
+    piel: 0xeec29c,
+    // (la cadera va un poco mÃ¡s alta y adelante: asÃ­ los hombros quedan donde la cÃ¡mara espera)
+    modelo: { ruta: '/modelos/principal.glb', altura: 1.72, rotacionY: Math.PI, piel: 0xf0c7a6, alturaCadera: 0.6, offsetCaderaZ: -0.04, contorno: 0.0035 },
+  },
+
+  // Ãšnica con rojo en toda la escena
+  profesora: {
+    tipo: 'placeholder',
+    postura: 'parado',
+    buzo: 0x7a1c22,        // saco rojo oscuro
+    pollera: 0x1d2547,     // pollera azul marino
+    pantalon: 0x3b3236,    // medias / piernas
+    piel: 0xf0cfb2,
+    pelo: { estilo: 'rodete', color: 0xa3a3a8 },
+    anteojos: true,
+    // Con pollera tubo da pasos mÃ¡s cortos (zancada = amplitud del muslo al caminar)
+    zancada: 0.24,
+    modelo: { ruta: '/modelos/teacher.glb', altura: 1.72, rotacionY: Math.PI, piel: 0xf0cfb2 },
+  },
+
+  // Esquina del fondo, izquierda. Silueta: cola de caballo
+  senias: {
+    tipo: 'placeholder',
+    postura: 'sentado',
+    buzo: 0x8fd0f2,
+    pantalon: 0x3b4a66,
+    piel: 0xf1c9a5,
+    pelo: { estilo: 'coleta', color: 0x141018 },
+    lapicera: true,
+    modelo: { ruta: '/modelos/amiga2.glb', altura: 1.62, rotacionY: Math.PI, piel: 0xf3d2bb, alturaCadera: 0.5 },
+  },
+
+  // Esquina del fondo, derecha. Silueta: el mÃ¡s grandote, pelo corto rubio (placeholder: capucha)
+  mensajero: {
+    tipo: 'placeholder',
+    postura: 'sentado',
+    buzo: 0x2c5a3a,
+    pantalon: 0x2f3440,
+    piel: 0xc68d62,
+    pelo: { estilo: 'corto', color: 0x2a1c12 },
+    capucha: true,
+    modelo: { ruta: '/modelos/amigo1.glb', altura: 1.78, rotacionY: Math.PI, piel: 0xe7b892, alturaCadera: 0.53 },
+  },
+
+  // Fila de adelante, extremo derecho. Silueta: pelo largo suelto
+  grupo: {
+    tipo: 'placeholder',
+    postura: 'sentado',
+    buzo: 0xb89ce3,
+    pantalon: 0x3b4a66,
+    piel: 0xf6d7bd,
+    pelo: { estilo: 'largo', color: 0xeac862 },
+  },
+
+  // Banco cercano, fuera del grupo. Silueta: anteojos y cabeza siempre gacha
+  aplicado: {
+    tipo: 'placeholder',
+    postura: 'sentado',
+    buzo: 0xd3a12e,
+    pantalon: 0x4a4038,
+    piel: 0xe0ac84,
+    pelo: { estilo: 'corto', color: 0x3a2618 },
+    anteojos: true,
+  },
+};
+
+// DÃ³nde se sienta cada uno (columna 0 = izquierda, fila 0 = adelante)
+export const UBICACIONES = {
+  senias: { col: 0, fila: 4 },
+  mensajero: { col: 4, fila: 4 },
+  grupo: { col: 4, fila: 0 },
+  aplicado: { col: 3, fila: 2 },
+};
+
+// Bancos que quedan vacÃ­os para que haya lÃ­nea de vista directa entre el
+// banco central y cada amigo (si no, un compaÃ±ero de relleno los tapa)
+export const BANCOS_VACIOS = [
+  { col: 1, fila: 3 },
+  { col: 3, fila: 3 },
+  { col: 3, fila: 1 },
+];
+
+// Estudiantes de relleno: reutilizan los modelos de Tomi, Sofi y el protagonista (cuerpo completo,
+// sentados). Todos con remera azul marino y el pelo en distintos colores para que no parezcan clones.
+const AZUL_MARINO = 0x1b2a52;
+const PELOS_RELLENO = [0x15110e, 0x2b1b12, 0x4a2f1c, 0x6b4a2b, 0x9a6b35, 0xc9a45c, 0x8a3b1f, 0x5d5a58];
+const MODELOS_RELLENO = [
+  { ruta: '/modelos/amigo1.glb', altura: 1.78, alturaCadera: 0.53 },
+  { ruta: '/modelos/amiga2.glb', altura: 1.62, alturaCadera: 0.5 },
+  { ruta: '/modelos/principal.glb', altura: 1.72, alturaCadera: 0.52, offsetCaderaZ: 0.04 },
+];
+const ESTILOS_RELLENO = ['corto', 'corto', 'largo', 'rodete', 'corto'];
+
+export function configRelleno(rnd) {
+  const elegir = (lista) => lista[Math.floor(rnd() * lista.length)];
+  const pelo = elegir(PELOS_RELLENO);
+  return {
+    // (placeholder de respaldo si el modelo no carga)
+    tipo: 'placeholder',
+    postura: 'sentado',
+    buzo: AZUL_MARINO,
+    pantalon: 0x40444c,
+    piel: elegir(PIELES),
+    pelo: { estilo: elegir(ESTILOS_RELLENO), color: pelo },
+    anteojos: rnd() < 0.2,
+    modelo: { ...elegir(MODELOS_RELLENO), rotacionY: Math.PI, elevarTorso: 0.12, remera: AZUL_MARINO, pelo },
+  };
+}
+
+// Nombres con los que el HUD y los subtÃ­tulos se refieren a cada uno
+export const NOMBRES = {
+  senias: 'Sofi',
+  mensajero: 'Tomi',
+  grupo: 'Juli',
+  aplicado: 'MartÃ­n',
+  profesora: 'la profe',
+};
+
+// Rutas de todos los modelos (para precargarlos antes de armar el elenco)
+export function rutasModelos() {
+  return Object.values(PERSONAJES)
+    .map((c) => c.modelo?.ruta)
+    .filter(Boolean);
+}

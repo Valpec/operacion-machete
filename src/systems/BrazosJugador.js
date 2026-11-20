@@ -10,6 +10,7 @@ export class BrazosJugador {
     this.poseActual = null;
     this.lanzando = 0; // segundos que dura el gesto de soltar el papelito
     this.papelEnMano = null; // malla del papelito pegada a la mano
+    this.papelAbierto = null; // malla del papelito desplegado al abrirlo
   }
 
   gestoLanzar() {
@@ -35,6 +36,20 @@ export class BrazosJugador {
     }
     this.p.animador.capa('escribir', escribir);
     this.p.mostrarDedos(a.modoHoja ? 0 : a.mostrandoDedos);
-    if (this.papelEnMano) this.papelEnMano.visible = !!estado.papelEnMano && !a.modoHoja;
+
+    if (this.papelEnMano) {
+      this.papelEnMano.visible =
+        !!estado.papelEnMano &&
+        !a.abriendoPapel &&
+        !a.modoHoja;
+    }
+
+    // Papel desplegado entre ambas manos
+    if (this.papelAbierto) {
+      this.papelAbierto.visible =
+        !!estado.papelEnMano &&
+        a.abriendoPapel &&
+        !a.modoHoja;
+    }
   }
 }

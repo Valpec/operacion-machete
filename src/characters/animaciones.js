@@ -26,8 +26,8 @@ export const POSES = {
     hombroI: [0.55, 0, 0.3], codoI: [0.95, 0, 0], munecaI: [0, -1.4, 0],
     hombroD: [0.62, 0, -0.12], codoD: [0.85, 0, 0], munecaD: [0.3, 1.2, 0],
   },
-  // Primera persona: manos apoyadas sobre la hoja
-  // (munecas y = ±π/2: la palma mira hacia abajo, apoyada; no cambia nada en el placeholder)
+  
+// Primera persona: manos apoyadas naturalmente a los costados de la hoja
   manosEnBanco: {
     hombroI: [0.55, 0, 0.12], codoI: [0.95, 0, 0], munecaI: [0, -1.45, 0],
     hombroD: [0.55, 0, -0.12], codoD: [0.95, 0, 0], munecaD: [0, 1.45, 0],
@@ -133,8 +133,13 @@ export const POSES = {
     hombroD: [1.85, 0, 0.02], codoD: [0.45, 0, 0],
   },
   jugAbrirPapel: {
-    hombroI: [0.35, 0, 0.35], codoI: [1.05, 0, 0], munecaI: [0, -0.6, 0],
-    hombroD: [0.35, 0, -0.35], codoD: [1.05, 0, 0], munecaD: [0, 0.6, 0],
+    hombroI: [0.58, 0, 0.16],
+    codoI: [0.92, 0, 0],
+    munecaI: [0.2, -1.15, 0],
+
+    hombroD: [0.58, 0, -0.16],
+    codoD: [0.92, 0, 0],
+    munecaD: [0.2, 1.15, 0],
   },
   // ---- Intro: la cena ----
   // El chico revuelve la comida sin comer, encorvado y con la cabeza gacha

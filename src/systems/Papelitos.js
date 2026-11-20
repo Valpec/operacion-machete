@@ -54,13 +54,36 @@ export class Papelitos {
     // Blanco del jugador al devolver: las manos de Tomi sobre su banco
     this.blancoTomi = this.tomi.banco.posicion.clone().add(new THREE.Vector3(0, 0.3, 0.25));
 
-    // Papel en la mano del protagonista
-    this.papelMano = new THREE.Mesh(this.geo, this.mat);
-    contorno(this.papelMano, 0.004);
-    this.papelMano.position.set(0, -0.07, -0.02);
+    // Papel pequeño sostenido por la mano derecha
+    this.papelMano = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.045, 0.035),
+      new THREE.MeshBasicMaterial({
+        color: 0xfbfaf2,
+        side: THREE.DoubleSide
+      })
+    );
+
+    this.papelMano.position.set(0.025, -0.045, -0.025);
+    this.papelMano.rotation.set(0, 0, 0);
     this.papelMano.visible = false;
+
     this.prota.rig.brazoD.muneca.add(this.papelMano);
     brazos.papelEnMano = this.papelMano;
+
+// Hojita desplegada que se ve entre ambas manos al abrir el papel bajo el banco
+    this.papelAbierto = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.11, 0.08, 2, 1),
+      new THREE.MeshBasicMaterial({ color: 0xfbfaf2, side: THREE.DoubleSide }),
+    );
+    contorno(this.papelAbierto, 0.002);
+    const posHoja = this.papelAbierto.geometry.attributes.position;
+    for (let i = 0; i < posHoja.count; i++) {
+      if (Math.abs(posHoja.getX(i)) < 0.01) posHoja.setZ(i, 0.008);
+    }
+    this.papelAbierto.geometry.computeVertexNormals();
+    this.papelAbierto.visible = false;
+    this.scene.add(this.papelAbierto);
+    brazos.papelAbierto = this.papelAbierto;
 
     // Arco de trayectoria: una hilera de puntos (se ve mejor que una línea de 1 px)
     const n = this.l.puntosArco;
@@ -256,9 +279,21 @@ export class Papelitos {
 
   tomiPrepara() {
     this.fase = 'preparando';
-    this.timer = 0.7;
+    this.timer = this.b.tiempoAviso ?? 1.8;
     this.tomi.animador.pose('prepararLanzar', 6);
     this.mirarTomi(true);
+
+    // Posición de Tomi para el audio y el indicador del HUD
+    const pos = this.tomi.raiz.position.clone().setY(1.1);
+    const intensidad = (this.b.intensidadAviso ?? 0.14) + 0.15 * (this.ia.escalada ?? 0);
+
+    // Eventos de audio y alerta para la IA (ruido sutil)
+    bus.emit('tomiAvisa', { posicion: pos });
+    bus.emit('ruido', { posicion: pos, intensidad, tipo: 'susurro' });
+
+    // Feedback claro en HUD con dirección espacial
+    this.hud.indicar({ tipo: 'susurro', posicion: pos, etiqueta: '¡pst!', icono: '🤫', duracion: this.timer });
+    this.hud.subtitulo(`[¡Pst! ${this.nombre} te llama ${this.hud.direccionTexto(pos)}]`, 2.2);
   }
 
   tomiLanza() {
@@ -412,12 +447,39 @@ export class Papelitos {
       }
     }
 
-    // Abriendo el papel bajo el banco (pequeña animación con la cámara)
+// Abriendo el papel bajo el banco (pequeña animación con la cámara)
     if (estado.accion.abriendoPapel) {
       this.abriendo -= dt;
       const avance = 1 - Math.max(0, this.abriendo) / this.b.tiempoAbrir;
-      const mezcla = Math.min(1, Math.sin(Math.min(1, avance) * Math.PI) * 1.6);
-      this.camara.solicitarMirada('papel', { mezcla: Math.max(0, mezcla), yaw: 0, pitch: -0.95, adelante: 0.5 });
+      const mezcla = Math.min(1, Math.sin(Math.min(1, avance) * Math.PI) * 1.4);
+      this.camara.solicitarMirada('papel', { mezcla: Math.max(0, mezcla), yaw: 0, pitch: -0.72, adelante: 0.18 });
+
+      // Colocar el papel entre ambas manos y detrás de ellas
+      const mI = this.prota.rig.brazoI.muneca.getWorldPosition(
+        new THREE.Vector3()
+      );
+
+      const mD = this.prota.rig.brazoD.muneca.getWorldPosition(
+        new THREE.Vector3()
+      );
+
+      const ojos = this.camara.posicionOjos(new THREE.Vector3());
+
+      // Centro entre las dos muñecas
+      const centro = new THREE.Vector3().lerpVectors(mI, mD, 0.5);
+
+      // Dirección desde la cámara hacia el papel
+      const haciaFondo = new THREE.Vector3()
+        .subVectors(centro, ojos)
+        .normalize();
+
+      // Alejar el papel de la cámara para que las manos queden delante
+      this.papelAbierto.position.copy(centro);
+      this.papelAbierto.position.addScaledVector(haciaFondo, 0.045);
+
+      // Orientar la hoja hacia la cámara
+      this.papelAbierto.lookAt(ojos);
+
       if (this.abriendo <= 0) {
         estado.accion.abriendoPapel = false;
         this.camara.solicitarMirada('papel', { mezcla: 0 });
@@ -426,6 +488,7 @@ export class Papelitos {
         this.hud.mensaje(`El papelito dice: «${urg}¿qué va en la ${n}?» — consultá el machete y devolvéselo`, 4.5);
       }
     }
+
     if (estado.papelEnMano && !estado.accion.abriendoPapel) {
       const p = estado.papelEnMano;
       const urg = p.urgente ? '<b>¡URGENTE!</b> ' : '';
@@ -451,14 +514,26 @@ export class Papelitos {
           else this.timer = 2;
         }
         break;
-      case 'preparando':
-        if (this.ia.estado !== 'patrulla' && !this.urgente) {
+      case 'preparando': {
+        // Si la profesora deja de patrullar o mira hacia Tomi, aborta y disimula
+        const peligro = this.ia.estado !== 'patrulla' || this.ia.mirandoHacia(this.tomi.raiz.position, 40);
+        if (peligro && !this.urgente) {
           this.tomi.animador.pose('disimular', 10);
           this.mirarTomi(false);
           this.fase = 'espera';
           this.timer = azar(8, 14);
-        } else if (this.timer <= 0) this.tomiLanza();
+          break;
+        }
+
+        // Si el jugador gira y mira a Tomi, lanza casi al instante (tras al menos 0.45s de aviso)
+        const yaLoMiro = this.timer < (this.b.tiempoAviso - 0.45) &&
+          this.camara.anguloHacia(this.tomi.posicionCabeza(new THREE.Vector3())) < 28;
+
+        if (this.timer <= 0 || yaLoMiro) {
+          this.tomiLanza();
+        }
         break;
+      }
       case 'enVuelo':
         // si nadie lo atrapó, alTocarSuperficie vuelve a 'espera'; si lo atrapaste, pasa a esperar respuesta
         break;

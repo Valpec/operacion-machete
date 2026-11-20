@@ -280,11 +280,11 @@ export const POSES_MANO = {
   },
   // Sostener un papelito: pinza más cerrada
   pinza: {
-    pulgar: { f: [0.3, 0.4, 0.3], abrir: -0.05, cruzar: 0.7 },
-    indice: { f: [0.65, 0.75, 0.4], abrir: 0.0 },
-    medio: { f: [0.7, 0.85, 0.5], abrir: 0.02 },
-    anular: { f: [0.8, 0.95, 0.55], abrir: 0.04 },
-    menique: { f: [0.9, 1.0, 0.6], abrir: 0.07 },
+    pulgar: { f: [0.22, 0.28, 0.2], abrir: 0.12, cruzar: 0.45 },
+    indice: { f: [0.42, 0.48, 0.25], abrir: -0.02 },
+    medio: { f: [0.52, 0.62, 0.35], abrir: 0.01 },
+    anular: { f: [0.62, 0.72, 0.42], abrir: 0.03 },
+    menique: { f: [0.72, 0.8, 0.48], abrir: 0.06 },
   },
   // Mano que espera atrapar algo: abierta y un poco cóncava
   atrapar: {
