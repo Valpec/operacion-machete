@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { toon, contorno, RAMPA, COLOR_CONTORNO } from '../world/materiales.js';
 import { Animador } from './animaciones.js';
-import { autoRig } from './AutoRig.js';
+import { autoRig, apoyarEnAsiento } from './AutoRig.js';
+import { ASIENTO } from '../world/Aula.js';
 import { poseSenia } from './Manos.js';
 
 // Medidas base del placeholder (en metros)
@@ -127,6 +128,13 @@ export class Personaje {
 
     this.rig.brazoI = this.construirBrazo(torso, -1, matBuzo, matPiel, cfg);
     this.rig.brazoD = this.construirBrazo(torso, 1, matBuzo, matPiel, cfg);
+
+    // contorno: 0 en config.js -> se quitan las líneas negras del muñeco
+    if (cfg.contorno === 0) {
+      const bordes = [];
+      this.raiz.traverse((o) => o.userData.esContorno && bordes.push(o));
+      bordes.forEach((o) => o.removeFromParent());
+    }
 
     if (cfg.escala) this.raiz.scale.setScalar(cfg.escala);
     this.animador.poseInicial(sentado ? (cfg.soloBrazos ? 'manosEnBanco' : 'sentado') : 'parado');
@@ -388,6 +396,8 @@ export class Personaje {
       rig.cadera.position.z += m.offsetCaderaZ ?? 0.04;
       // Torso más alto (sentarse derecho): sube el tronco, la cabeza y los brazos; las piernas quedan
       if (m.elevarTorso) rig.torso.position.y += m.elevarTorso;
+      // La cola se apoya sobre el asiento en vez de atravesarlo (la raíz está en el centro de la silla)
+      if (!cfg.soloBrazos) apoyarEnAsiento(malla.material, ASIENTO);
       for (const [lado, signo] of [['I', -1], ['D', 1]]) {
         rig['pierna' + lado].rotation.set(Math.PI / 2 - 0.05, 0, -signo * 0.06);
         rig['rodilla' + lado].rotation.set(-Math.PI / 2 + 0.12, 0, signo * 0.04);

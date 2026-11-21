@@ -48,9 +48,13 @@ export class Papelitos {
     this.geo = new THREE.IcosahedronGeometry(this.b.radio * 1.4, 0);
     this.mat = toon(0xfbfaf2);
 
-    // Punto donde el jugador atrapa (sobre el banco, frente a las manos)
+    // Punto donde el jugador atrapa: a la altura del hombro, corrido hacia el lado de Tomi.
+    // Así, cuando girás a mirarlo, el papel llega DENTRO de tu campo visual (antes apuntaba
+    // al frente del banco y salía de la pantalla justo antes de poder agarrarlo).
     const c = aula.bancoCentral;
-    this.puntoAtrape = new THREE.Vector3(c.posicion.x, 1.0, c.posicion.z + 0.1);
+    const hacia = new THREE.Vector3().subVectors(this.tomi.raiz.position, c.asiento).setY(0).normalize();
+    this.puntoAtrape = c.asiento.clone().addScaledVector(hacia, this.b.distanciaAtrape).setY(this.b.alturaAtrape);
+    this.clicPendiente = 0; // clic "anticipado": si apretás un poco antes de tiempo, igual cuenta
     // Blanco del jugador al devolver: las manos de Tomi sobre su banco
     this.blancoTomi = this.tomi.banco.posicion.clone().add(new THREE.Vector3(0, 0.3, 0.25));
 
@@ -114,7 +118,10 @@ export class Papelitos {
 
     bus.on('mouse', ({ boton, abajo }) => {
       if (estado.pausado || estado.final || estado.accion.modoHoja) return;
-      if (boton === CONTROLES.botonInteractuar && abajo) this.intentarAtrapar();
+      if (boton === CONTROLES.botonInteractuar && abajo) {
+        // Si todavía no llegó pero viene en camino, el clic queda "guardado" un instante
+        if (!this.intentarAtrapar() && this.papelEnCamino()) this.clicPendiente = this.b.margenClic;
+      }
       if (boton === CONTROLES.botonLanzar) {
         if (abajo) this.empezarApuntar();
         else this.soltar();
@@ -127,7 +134,8 @@ export class Papelitos {
     hud.registrarAcciones(() => {
       if (estado.accion.modoHoja) return [];
       const acciones = [];
-      if (this.papelAtrapable()) acciones.push({ tecla: 'Clic', texto: '¡atrapar el papelito!' });
+      if (this.papelAtrapable()) acciones.push({ tecla: 'Clic', texto: '¡AHORA! atrapar el papelito' });
+      else if (this.papelEnCamino()) acciones.push({ tecla: 'Clic', texto: `¡viene un papelito de ${this.nombre}! atrapalo cuando llegue` });
       if (estado.papelEnMano && !estado.accion.abriendoPapel) {
         if (!estado.papelEnMano.consultado) {
           acciones.push({ tecla: 'E', texto: estado.macheteGuardado ? 'ya no tenés machete' : 'consultá el machete' });
@@ -166,8 +174,14 @@ export class Papelitos {
     this.papeles = this.papeles.filter((p) => p !== papel);
   }
 
+  // Se puede atrapar mientras vuela cerca del punto de atrape y todavía no tocó nada
   alcanzable(papel) {
-    return papel.mesh.position.distanceTo(this.puntoAtrape) < this.b.radioAtrape;
+    return !papel.toco && papel.mesh.position.distanceTo(this.puntoAtrape) < this.b.radioAtrape;
+  }
+
+  // ¿Hay un papelito de Tomi volando hacia vos (todavía sin llegar)?
+  papelEnCamino() {
+    return this.papeles.some((p) => p.origen === 'mensajero' && p.estado === 'vuelo' && !p.toco);
   }
 
   papelAtrapable() {
@@ -265,7 +279,7 @@ export class Papelitos {
     a.capa('reclamo', 1);
     setTimeout(() => {
       a.capa('reclamo', 0);
-      a.pose('sentado', 4);
+      a.pose('escribirFondo', 4);
     }, 1600);
   }
 
@@ -310,7 +324,7 @@ export class Papelitos {
     this.hud.indicar({ tipo: 'papel', posicion: desde, etiqueta: 'papelito', icono: '📄', duracion: 1.5 });
     this.fase = 'enVuelo';
     setTimeout(() => {
-      this.tomi.animador.pose('sentado', 4);
+      this.tomi.animador.pose('escribirFondo', 4);
       this.mirarTomi(false);
     }, 600);
   }
@@ -333,7 +347,8 @@ export class Papelitos {
   // ---------- El jugador atrapa, abre y devuelve ----------
   intentarAtrapar() {
     const papel = this.papelAtrapable();
-    if (!papel || estado.papelEnMano) return;
+    if (!papel || estado.papelEnMano) return false;
+    this.clicPendiente = 0;
     this.quitarPapel(papel);
     estado.papelEnMano = { pregunta: papel.pregunta, consultado: false, desde: estado.tiempo, urgente: !!papel.urgente };
     estado.accion.abriendoPapel = true;
@@ -342,6 +357,7 @@ export class Papelitos {
     this.timer = this.b.tiempoLimiteRespuesta;
     bus.emit('papelAtrapado');
     this.hud.subtitulo('[Atrapaste el papelito: lo abrís debajo del banco]', 2);
+    return true;
   }
 
   empezarApuntar() {
@@ -431,10 +447,23 @@ export class Papelitos {
   update(dt) {
     const t = performance.now() / 1000;
 
+    // Clic anticipado: si apretaste un instante antes de que llegara, se atrapa apenas entra en alcance
+    if (this.clicPendiente > 0) {
+      this.clicPendiente -= dt;
+      if (this.papelAtrapable()) this.intentarAtrapar();
+    }
+
     // Física de los papeles
     for (const papel of [...this.papeles]) {
       if (papel.estado === 'vuelo') {
-        this.integrar(papel, dt);
+        // El papel de Tomi se frena al llegar a tu alcance (cámara lenta): sin esto cruza
+        // la zona en 0,2 s cayendo casi en picada y es muy difícil de agarrar
+        let paso = dt;
+        if (papel.origen === 'mensajero' && !papel.toco) {
+          const d = papel.mesh.position.distanceTo(this.puntoAtrape);
+          if (d < this.b.radioAtrape * 1.3) paso *= this.b.lentitudAtrape;
+        }
+        this.integrar(papel, paso);
         // ¿Tu devolución llegó a las manos de Tomi?
         if (papel.origen === 'jugador' && !papel.toco && papel.mesh.position.distanceTo(this.blancoTomi) < this.b.radioExito) {
           this.quitarPapel(papel);
@@ -492,7 +521,13 @@ export class Papelitos {
     if (estado.papelEnMano && !estado.accion.abriendoPapel) {
       const p = estado.papelEnMano;
       const urg = p.urgente ? '<b>¡URGENTE!</b> ' : '';
-      this.hud.setPedido(`📝 <b>${this.nombre}:</b> «${urg}¿qué va en la ${p.pregunta + 1}?» ${p.consultado ? '· ✓ respuesta escrita' : '· falta consultar el machete'}`);
+      // Cuánto le queda a Tomi antes de cansarse de esperar (en rojo los últimos 10 s)
+      let reloj = '';
+      if (this.fase === 'esperandoRespuesta') {
+        const s = Math.max(0, Math.ceil(this.timer));
+        reloj = ` <span class="pedido-tiempo${s <= 10 ? ' apurado' : ''}">⏱ ${s} s</span>`;
+      }
+      this.hud.setPedido(`📝 <b>${this.nombre}:</b> «${urg}¿qué va en la ${p.pregunta + 1}?» ${p.consultado ? '· ✓ respuesta escrita' : '· falta consultar el machete'}${reloj}`);
     } else if (!estado.papelEnMano) {
       this.hud.setPedido(null);
     }
@@ -567,7 +602,7 @@ export class Papelitos {
   tomiAtrapa() {
     const a = this.tomi.animador;
     a.pose('atrapar', 14);
-    setTimeout(() => a.pose('sentado', 4), 700);
+    setTimeout(() => a.pose('escribirFondo', 4), 700);
     estado.registro.papelitosDevueltos += 1;
     participar(this.puntos, { intercambio: true });
     this.hud.subtitulo(`[${this.nombre} atrapó tu papelito]`, 2.5);

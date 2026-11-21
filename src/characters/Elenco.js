@@ -1,6 +1,15 @@
 import { crearPersonaje } from './Personaje.js';
-import { PERSONAJES, UBICACIONES, BANCOS_VACIOS, configRelleno } from './config.js';
+import { PERSONAJES, ubicaciones, DISTANCIA_LINEA_VISTA, configRelleno } from './config.js';
 import { aleatorioConSemilla } from '../world/materiales.js';
+
+// Distancia (en el plano del piso) de un punto p al segmento a-b
+function distanciaASegmento(p, a, b) {
+  const abx = b.x - a.x;
+  const abz = b.z - a.z;
+  const largo2 = abx * abx + abz * abz || 1;
+  const t = Math.max(0, Math.min(1, ((p.x - a.x) * abx + (p.z - a.z) * abz) / largo2));
+  return Math.hypot(p.x - (a.x + abx * t), p.z - (a.z + abz * t));
+}
 
 /**
  * Ubica a todos los personajes en el aula.
@@ -18,10 +27,22 @@ export function crearElenco(aula, scene) {
     return personaje;
   };
 
-  // Amigos y compañero aplicado
+  // Amigos y compañero aplicado (las ubicaciones dependen del tamaño de la grilla)
   const ocupados = new Set();
-  for (const [clave, ub] of Object.entries(UBICACIONES)) {
-    const banco = aula.buscarBanco(ub.col, ub.fila);
+  const columnas = Math.max(...aula.bancos.map((b) => b.col)) + 1;
+  const filas = Math.max(...aula.bancos.map((b) => b.fila)) + 1;
+  if (columnas < 3 || filas < 3) {
+    console.warn(`[aula] Con ${columnas}×${filas} bancos no entran todos los personajes: se recomienda al menos 3×3.`);
+  }
+  for (const [clave, ub] of Object.entries(ubicaciones(columnas, filas))) {
+    let banco = aula.buscarBanco(ub.col, ub.fila);
+    // Si el banco no existe o ya está tomado, se usa el libre más cercano a esa posición
+    if (!banco || ocupados.has(banco) || banco === aula.bancoCentral) {
+      banco = aula.bancos
+        .filter((b) => !ocupados.has(b) && b !== aula.bancoCentral)
+        .sort((a, c) => Math.hypot(a.col - ub.col, a.fila - ub.fila) - Math.hypot(c.col - ub.col, c.fila - ub.fila))[0];
+    }
+    if (!banco) throw new Error(`[aula] No hay bancos suficientes para sentar a "${clave}". Agrandá aula.columnas / aula.filas en balance.json.`);
     elenco[clave] = sentar(crearPersonaje(PERSONAJES[clave], clave), banco);
     ocupados.add(banco);
   }
@@ -30,7 +51,15 @@ export function crearElenco(aula, scene) {
   elenco.protagonista = sentar(crearPersonaje(PERSONAJES.protagonista, 'protagonista'), aula.bancoCentral);
   ocupados.add(aula.bancoCentral);
 
-  for (const v of BANCOS_VACIOS) ocupados.add(aula.buscarBanco(v.col, v.fila));
+  // Bancos vacíos: los que tapan la línea de vista entre el banco central y cada amigo
+  const desde = aula.bancoCentral.asiento;
+  for (const amigo of [elenco.senias, elenco.mensajero, elenco.grupo]) {
+    const hasta = amigo.banco.asiento;
+    for (const b of aula.bancos) {
+      if (ocupados.has(b)) continue;
+      if (distanciaASegmento(b.asiento, desde, hasta) < DISTANCIA_LINEA_VISTA) ocupados.add(b);
+    }
+  }
 
   // Relleno en el resto de los bancos
   for (const banco of aula.bancos) {
@@ -42,12 +71,12 @@ export function crearElenco(aula, scene) {
   }
 
   // Poses iniciales
-  elenco.aplicado.animador.poseInicial('escribir');
+  elenco.aplicado.animador.poseInicial('escribirFondo');
   elenco.aplicado.animador.capa('escribir', 1);
   elenco.senias.mostrarLapicera(true);
-  elenco.senias.animador.poseInicial('escribir');
-  elenco.mensajero.animador.poseInicial('sentado');
-  elenco.grupo.animador.poseInicial('escribir');
+  elenco.senias.animador.poseInicial('escribirFondo'); // (pose calibrada para los modelos: manos sobre el banco)
+  elenco.mensajero.animador.poseInicial('escribirFondo');
+  elenco.grupo.animador.poseInicial('escribirFondo');
   elenco.grupo.animador.capa('escribir', 0.5);
 
   // Profesora: parada al frente, de cara a los alumnos (los personajes miran a -Z)

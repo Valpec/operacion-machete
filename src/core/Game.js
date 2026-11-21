@@ -5,8 +5,10 @@ import { estado } from './GameState.js';
 export class Game {
   constructor(contenedor, balance) {
     this.balance = balance;
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // Sin antialias del canvas: todo se dibuja en los búferes del postprocesado, que no lo usan
+    // (el MSAA de esos búferes lo maneja core/Calidad.js según la calidad elegida)
+    this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.shadowMap.enabled = true;

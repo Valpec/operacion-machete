@@ -67,7 +67,7 @@ export class Grupo {
       if (this.reclamando <= 0 || this.ia.estado !== 'patrulla') {
         this.reclamando = 0;
         this.juli.animador.capa('reclamo', 0);
-        this.juli.animador.pose('escribir', 5);
+        this.juli.animador.pose('escribirFondo', 5);
         this.mirarAlJugador(this.juli, 0);
       }
       return;

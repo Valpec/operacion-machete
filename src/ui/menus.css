@@ -69,3 +69,10 @@ details { margin-top: 12px; }
 .inicio .controles { font-size: 13px; }
 .inicio .controles td { padding: 3px 5px; }
 .inicio .botonera { position: sticky; bottom: 0; margin: 10px -26px 0; padding: 12px 26px 16px; background: var(--papel); border-top: 1px solid #e3dccb; }
+
+/* Calidad gráfica y contador de FPS */
+.opcion select { grid-column: 2 / span 2; padding: 4px 6px; border-radius: 6px; border: 1.5px solid #4a4f63; background: #fff; font: inherit; }
+.contador-fps {
+  position: absolute; right: 14px; bottom: 14px; padding: 3px 8px; border-radius: 6px;
+  background: rgba(10, 12, 20, 0.7); color: #b6f5b6; font: 12px/1.4 Consolas, 'Courier New', monospace; pointer-events: none;
+}

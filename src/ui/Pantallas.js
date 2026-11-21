@@ -1,4 +1,5 @@
 import { estado } from '../core/GameState.js';
+import { bus } from '../core/EventBus.js';
 import { NOMBRES } from '../characters/config.js';
 
 const CLAVE_OPCIONES = 'elParcial.opciones';
@@ -272,6 +273,14 @@ export class Pantallas {
         ${deslizador('intensidadVibracion', 'Vibración de cámara', 0, 1, 0.05, pct)}
         <label class="opcion casilla"><input type="checkbox" data-clave="subtitulos" ${o.subtitulos ? 'checked' : ''}>
           <span>Subtítulos de sonidos</span></label>
+        <label class="opcion"><span>Calidad gráfica</span>
+          <select data-clave="calidad">
+            ${[['auto', 'Automática'], ['alta', 'Alta'], ['media', 'Media'], ['baja', 'Baja (PC lenta)']]
+              .map(([v, t]) => `<option value="${v}" ${(o.calidad ?? 'auto') === v ? 'selected' : ''}>${t}</option>`)
+              .join('')}
+          </select><output></output></label>
+        <label class="opcion casilla"><input type="checkbox" data-clave="mostrarFps" ${o.mostrarFps ? 'checked' : ''}>
+          <span>Mostrar FPS</span></label>
         <div class="botonera">
           <button class="boton-secundario" data-accion="reducir">Reducir efectos (desenfoque y vibración al 20%)</button>
           <button class="boton-grande" data-accion="volver">Volver</button>
@@ -289,6 +298,11 @@ export class Pantallas {
         guardarOpciones(o);
       }),
     );
+    this.opciones.querySelector('select[data-clave="calidad"]').addEventListener('change', (e) => {
+      o.calidad = e.target.value;
+      guardarOpciones(o);
+      bus.emit('calidad', o.calidad);
+    });
     this.opciones.querySelector('[data-accion="reducir"]').addEventListener('click', () => {
       for (const clave of ['intensidadDesenfoque', 'intensidadVibracion']) {
         o[clave] = 0.2;

@@ -288,9 +288,12 @@ function texturaHoja() {
   return texHoja;
 }
 
+// Línea de contorno de bancos y sillas (más fina que la del resto: tapas y asientos tienen 2-3,5 cm de espesor)
+const BORDE_MUEBLES = 0.003;
+
 function crearBanco() {
   const grupo = new THREE.Group();
-  const tapa = caja(0.72, 0.035, 0.5, C.maderaBanco, { borde: 0.008 });
+  const tapa = caja(0.72, 0.035, 0.5, C.maderaBanco, { borde: BORDE_MUEBLES });
   tapa.position.y = 0.74;
   tapa.name = 'tapaBanco';
   grupo.add(tapa);
@@ -303,7 +306,7 @@ function crearBanco() {
   hoja.name = 'hoja';
   grupo.add(hoja);
   // estante abajo de la tapa (donde se abren los papelitos)
-  const estante = caja(0.66, 0.02, 0.36, C.metal, { borde: 0.006 });
+  const estante = caja(0.66, 0.02, 0.36, C.metal, { borde: BORDE_MUEBLES });
   estante.position.set(0, 0.6, -0.05);
   grupo.add(estante);
   for (const sx of [-1, 1]) {
@@ -316,12 +319,16 @@ function crearBanco() {
   return { grupo, tapa, hoja };
 }
 
+// Medidas del asiento (la cola de los personajes sentados se apoya sobre él: ver AutoRig.apoyarEnAsiento)
+export const ASIENTO = { ancho: 0.42, fondo: 0.4, espesor: 0.03, altura: 0.45 };
+ASIENTO.tope = ASIENTO.altura + ASIENTO.espesor / 2;
+
 function crearSilla() {
   const grupo = new THREE.Group();
-  const asiento = caja(0.42, 0.03, 0.4, C.maderaBanco, { borde: 0.007 });
-  asiento.position.y = 0.45;
+  const asiento = caja(ASIENTO.ancho, ASIENTO.espesor, ASIENTO.fondo, C.maderaBanco, { borde: BORDE_MUEBLES });
+  asiento.position.y = ASIENTO.altura;
   grupo.add(asiento);
-  const respaldo = caja(0.42, 0.26, 0.03, C.maderaBanco, { borde: 0.007 });
+  const respaldo = caja(0.42, 0.26, 0.03, C.maderaBanco, { borde: BORDE_MUEBLES });
   respaldo.position.set(0, 0.78, 0.2);
   respaldo.rotation.x = -0.08;
   grupo.add(respaldo);

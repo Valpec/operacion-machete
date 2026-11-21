@@ -2,122 +2,119 @@
   "titulo": "Primer Parcial — Entornos Virtuales",
   "preguntas": [
     {
-      "enunciado": "¿Qué componente de una escena 3D define desde dónde y con qué ángulo se observa el mundo?",
+      "enunciado": "¿De qué color es el cielo en un día despejado?",
       "opciones": [
-        "La luz ambiental",
-        "La cámara",
-        "El material",
-        "La textura"
+        "Verde",
+        "Celeste",
+        "Violeta",
+        "Naranja"
       ],
       "correcta": 1,
       "claves": [
-        "desde dónde",
-        "con qué ángulo se observa"
+        "cielo",
+        "día despejado"
       ],
-      "recuerdo": "La profe lo repitió mil veces: «la cámara es el ojo del jugador»."
+      "recuerdo": "Mirá por la ventana del aula: está igual que la bandera."
     },
     {
-      "enunciado": "En un videojuego, ¿cómo se llama el ciclo que actualiza la lógica y dibuja la imagen en cada cuadro?",
+      "enunciado": "¿De qué color es el caballo blanco de San Martín?",
       "opciones": [
-        "Bucle de juego (game loop)",
-        "Árbol de escena",
-        "Shader de vértices",
-        "Mapa de normales"
+        "Negro",
+        "Marrón",
+        "Blanco",
+        "Gris"
+      ],
+      "correcta": 2,
+      "claves": [
+        "caballo blanco"
+      ],
+      "recuerdo": "La respuesta está en la misma pregunta…"
+    },
+    {
+      "enunciado": "¿Cuánto es 1 + 1?",
+      "opciones": [
+        "11",
+        "3",
+        "2",
+        "0"
+      ],
+      "correcta": 2,
+      "claves": [
+        "1 + 1"
+      ],
+      "recuerdo": "Un dedo más otro dedo… contá con la mano."
+    },
+    {
+      "enunciado": "¿Cuántas patas tiene un perro?",
+      "opciones": [
+        "2",
+        "4",
+        "6",
+        "8"
+      ],
+      "correcta": 1,
+      "claves": [
+        "patas",
+        "perro"
+      ],
+      "recuerdo": "Dos adelante y dos atrás, como cualquier mascota que conocés."
+    },
+    {
+      "enunciado": "¿Cuántos días tiene una semana?",
+      "opciones": [
+        "5",
+        "10",
+        "7",
+        "30"
+      ],
+      "correcta": 2,
+      "claves": [
+        "días",
+        "semana"
+      ],
+      "recuerdo": "De lunes a domingo, contando el finde."
+    },
+    {
+      "enunciado": "¿Qué animal hace “miau”?",
+      "opciones": [
+        "La vaca",
+        "El gato",
+        "El pato",
+        "El perro"
+      ],
+      "correcta": 1,
+      "claves": [
+        "miau"
+      ],
+      "recuerdo": "El que toma leche y duerme todo el día arriba de la compu."
+    },
+    {
+      "enunciado": "¿De qué color es el pasto?",
+      "opciones": [
+        "Verde",
+        "Azul",
+        "Rojo",
+        "Amarillo"
       ],
       "correcta": 0,
       "claves": [
-        "ciclo",
-        "en cada cuadro"
+        "pasto"
       ],
-      "recuerdo": "Actualizar, dibujar, repetir… el famoso «game loop»."
+      "recuerdo": "Como la cancha de fútbol… y como el pizarrón de esta aula."
     },
     {
-      "enunciado": "¿Qué técnica imita el aspecto de un dibujo animado usando pocos tonos de iluminación?",
+      "enunciado": "¿Qué sale de noche en el cielo?",
       "opciones": [
-        "Ray tracing",
-        "Cel-shading",
-        "Bump mapping",
-        "Antialiasing"
-      ],
-      "correcta": 1,
-      "claves": [
-        "dibujo animado",
-        "pocos tonos"
-      ],
-      "recuerdo": "Sombras planas, como en las historietas: cel-shading."
-    },
-    {
-      "enunciado": "Una máquina de estados finitos aplicada a un personaje no jugable sirve para…",
-      "opciones": [
-        "Comprimir sus texturas",
-        "Organizar sus comportamientos y las transiciones entre ellos",
-        "Calcular sus colisiones con el piso",
-        "Reproducir su voz"
-      ],
-      "correcta": 1,
-      "claves": [
-        "máquina de estados",
-        "personaje no jugable"
-      ],
-      "recuerdo": "Patrullar, sospechar, inspeccionar… cada cosa que hace es un estado."
-    },
-    {
-      "enunciado": "¿Qué medida indica cuántas imágenes por segundo muestra un juego?",
-      "opciones": [
-        "RPM",
-        "DPI",
-        "Hz de audio",
-        "FPS"
-      ],
-      "correcta": 3,
-      "claves": [
-        "imágenes por segundo"
-      ],
-      "recuerdo": "Frames Per Second: cuadros por segundo."
-    },
-    {
-      "enunciado": "En diseño de juegos, la retroalimentación (feedback) es…",
-      "opciones": [
-        "El presupuesto del proyecto",
-        "La música de fondo del menú",
-        "La respuesta del juego que le informa al jugador el resultado de sus acciones",
-        "El guion de las escenas"
+        "El sol",
+        "El arcoíris",
+        "La luna",
+        "Las nubes de colores"
       ],
       "correcta": 2,
       "claves": [
-        "retroalimentación",
-        "feedback"
+        "de noche"
       ],
-      "recuerdo": "Cada acción del jugador tiene que tener una respuesta que se vea o se escuche."
-    },
-    {
-      "enunciado": "¿Qué recomienda la accesibilidad para no transmitir información importante solo con el color?",
-      "opciones": [
-        "Subir la saturación",
-        "Usar sólo rojo y verde",
-        "Combinar el color con formas, texto o íconos",
-        "Bajar el brillo de la pantalla"
-      ],
-      "correcta": 2,
-      "claves": [
-        "accesibilidad",
-        "solo con el color"
-      ],
-      "recuerdo": "Pensá en alguien daltónico: color + ícono + texto."
-    },
-    {
-      "enunciado": "La «curva de dificultad» de un juego describe…",
-      "opciones": [
-        "El tamaño del mapa",
-        "La resolución de la pantalla",
-        "La cantidad de jugadores en línea",
-        "Cómo aumenta el desafío a lo largo del juego"
-      ],
-      "correcta": 3,
-      "claves": [
-        "curva de dificultad"
-      ],
-      "recuerdo": "Empieza tranquilo y va subiendo… como este parcial."
+      "recuerdo": "Redonda, blanca y a veces en cuarto creciente."
     }
   ],
   "machete": {

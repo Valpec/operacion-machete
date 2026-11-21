@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { RAMPA, COLOR_CONTORNO } from '../world/materiales.js';
 import { crearMuestreador, clasificarRegiones, prepararRecolor } from './Recolor.js';
 import { detectarDedos, crearHuesosDedos, pesosDedos, Manos } from './Manos.js';
+import { calcularColoresPlanos, prepararColoresPlanos, regionesPorZonas } from './ColoresPlanos.js';
 
 /**
  * Auto-rig de modelos estáticos (mallas sin esqueleto en pose A, como las que exportan
@@ -103,7 +104,7 @@ function ajusteLineal(puntos) {
 }
 
 // ---------- Detección de articulaciones ----------
-function detectarArticulaciones(g, H) {
+function detectarArticulaciones(g, H, cuelloForzado = null) {
   const pos = g.attributes.position;
   const banda = H * 0.008;
   const hueco = H * 0.018;
@@ -137,6 +138,13 @@ function detectarArticulaciones(g, H) {
       cuelloY = k * H;
       cuelloZ = isla.z;
     }
+  }
+  // Altura del cuello indicada a mano en config.js (modelo.cuello, fracción de la altura): para
+  // modelos con pelo largo que tapa el cuello y hace que la parte "más angosta" sea la cara
+  if (cuelloForzado != null) {
+    cuelloY = cuelloForzado * H;
+    const islas = rebanada(pos, cuelloY, banda, hueco).filter((i) => Math.abs(i.centro) < H * 0.06);
+    if (islas.length) cuelloZ = islas.reduce((m, i) => (i.n > m.n ? i : m)).z;
   }
 
   const art = {};
@@ -304,7 +312,9 @@ function calcularPesos(g, art, rig, huesos, H, dedos) {
     [rig.cadera, new THREE.Vector3(0, art.separacionPiernas * 0.5 + art.cadera.y * 0.5, art.cadera.z), art.cintura, H * 0.075, 'tronco'],
     [rig.torso, art.cintura, art.cuello.clone().setY(art.cuello.y - H * 0.04), H * 0.085, 'tronco'],
     [rig.cuello, art.cuello, art.cabeza, H * 0.035, 'cuello'],
-    [rig.cabeza, art.cabeza.clone().setY(art.cabeza.y + H * 0.03), art.coronilla.clone().setY(H * 0.96), H * 0.06, 'cabeza'],
+    // La cabeza empieza en la articulación misma (antes arrancaba 3 % más arriba y la mandíbula,
+    // que sobresale hacia adelante y abajo, quedaba fuera de su alcance)
+    [rig.cabeza, art.cabeza, art.coronilla.clone().setY(H * 0.96), H * 0.06, 'cabeza'],
   ];
   for (const [lado, signo] of [['I', -1], ['D', 1]]) {
     const br = rig['brazo' + lado];
@@ -329,6 +339,9 @@ function calcularPesos(g, art, rig, huesos, H, dedos) {
       if (zona === 'brazo' && (p.x * signo < xHombro * 0.55 || p.y > art.cabeza.y)) continue;
       if (zona === 'pierna' && (p.y > art.cintura.y || p.x * signo < -H * 0.02)) continue;
       if (zona === 'cabeza' && p.y < art.cuello.y) continue;
+      // El torso no mueve nada por encima del cuello: si no, la barbilla queda pegada al pecho
+      // y se estira cuando la cabeza gira o se inclina
+      if (zona === 'tronco' && p.y > art.cuello.y) continue;
       if (zona === 'cuello' && (p.y < art.cuello.y - H * 0.05 || p.y > art.cabeza.y + H * 0.06)) continue;
       const d = distSegmento(p, a, z) / r;
       cand.push([idx(b), 1 / (Math.pow(d, 5) + 1e-4), zona]);
@@ -404,6 +417,36 @@ export function materialContornoPiel(grosor, color = COLOR_CONTORNO) {
   return m;
 }
 
+/**
+ * Personajes sentados: al doblar los muslos 90°, la piel de la cola y de atrás de los muslos se
+ * estira hacia abajo y atraviesa el asiento (de 6 a 13 cm según el modelo). Acá, en el shader y
+ * después del skinning, los vértices que caen DENTRO de la superficie del asiento y por debajo de
+ * él se suben hasta la madera: la cola queda "apoyada". No cambia la pose ni el resto del cuerpo.
+ *   asiento  { ancho, fondo, tope } en coordenadas de la raíz del personaje (centrado en x = z = 0)
+ */
+export function apoyarEnAsiento(material, asiento) {
+  const u = {
+    uAsiento: { value: new THREE.Vector3(0, asiento.tope + 0.004, 0) },
+    uAsientoMitad: { value: new THREE.Vector2(asiento.ancho / 2, asiento.fondo / 2) },
+  };
+  const previo = material.onBeforeCompile;
+  const clavePrevia = material.customProgramCacheKey?.bind(material);
+  material.onBeforeCompile = (shader, renderer) => {
+    previo?.call(material, shader, renderer);
+    Object.assign(shader.uniforms, u);
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nuniform vec3 uAsiento;\nuniform vec2 uAsientoMitad;')
+      .replace(
+        '#include <skinning_vertex>',
+        `#include <skinning_vertex>
+  if (abs(transformed.x - uAsiento.x) < uAsientoMitad.x && abs(transformed.z - uAsiento.z) < uAsientoMitad.y && transformed.y < uAsiento.y)
+    transformed.y = uAsiento.y;`,
+      );
+  };
+  material.customProgramCacheKey = () => `asiento|${clavePrevia ? clavePrevia() : ''}`;
+  return u;
+}
+
 // ---------- Preparación (se hace una sola vez por modelo) ----------
 // Normalizar la malla, detectar articulaciones y dedos y calcular los pesos de piel cuesta unos
 // 200 ms por modelo. Como en el aula hay muchos personajes que comparten modelo, todo eso se
@@ -425,13 +468,13 @@ function recortarTorso(g, art, H) {
 }
 
 function preparar(escena, cfg) {
-  const clave = `${cfg.ruta}|${cfg.altura}|${cfg.rotacionY ?? 0}|${cfg.soloTorso ? 'torso' : 'completo'}`;
+  const clave = `${cfg.ruta}|${cfg.altura}|${cfg.rotacionY ?? 0}|${cfg.soloTorso ? 'torso' : 'completo'}|${cfg.coloresPlanos ? 'planos' : ''}|${cfg.cuello ?? ''}`;
   const guardado = cachePreparados.get(clave);
   if (guardado) return guardado;
 
   const H = cfg.altura;
   const { geometria: g, material: original } = geometriaNormalizada(escena, cfg);
-  const art = detectarArticulaciones(g, H);
+  const art = detectarArticulaciones(g, H, cfg.cuello ?? null);
 
   const dedos = {};
   for (const lado of ['I', 'D']) {
@@ -448,9 +491,28 @@ function preparar(escena, cfg) {
   calcularPesos(g, art, rigTmp, huesosTmp, H, dedos);
 
   // Regiones de pelo y remera (para recolorear); si falla, el modelo queda con sus colores
+  const muestrear = crearMuestreador(original.map);
+
+  // Colores lisos por zona (texturas "mosaico" que de lejos se ven manchadas; ver ColoresPlanos.js)
+  let planos = null;
+  if (cfg.coloresPlanos) {
+    try {
+      planos = calcularColoresPlanos(g, art, H, muestrear, cfg.coloresPlanos === true ? {} : cfg.coloresPlanos);
+      if (planos) {
+        g.setAttribute('colorPlano', planos.colorPlano);
+        g.setAttribute('plano', planos.plano);
+      }
+    } catch (e) {
+      console.warn(`${cfg.ruta}: no se pudieron calcular los colores lisos; queda la textura.`, e);
+    }
+  }
+
+  // Regiones de pelo y remera (para recolorear). Con colores lisos se recolorea la zona de color
+  // completa; si no se puede (o no hay colores lisos), se clasifica por altura y color.
   let regiones = null;
   try {
-    regiones = clasificarRegiones(g, art, H, crearMuestreador(original.map));
+    if (planos) regiones = regionesPorZonas(g, art, H, planos);
+    regiones ??= clasificarRegiones(g, art, H, muestrear);
     if (regiones) g.setAttribute('region', regiones.region);
   } catch (e) {
     console.warn(`${cfg.ruta}: no se pudieron clasificar pelo y remera.`, e);
@@ -464,7 +526,7 @@ function preparar(escena, cfg) {
   for (const nombre of ['position', 'skinIndex', 'skinWeight']) gc.setAttribute(nombre, g.attributes[nombre]);
   gc.setAttribute('normal', normalesSuaves(g));
 
-  const listo = { g, gc, art, dedos, original, H, regiones, nHuesos: huesosTmp.length };
+  const listo = { g, gc, art, dedos, original, H, regiones, planos, nHuesos: huesosTmp.length };
   cachePreparados.set(clave, listo);
   return listo;
 }
@@ -474,7 +536,7 @@ function preparar(escena, cfg) {
  * Devuelve { rig, malla, contorno, articulaciones, esqueleto, manos } y agrega todo a "raiz".
  */
 export function autoRig(raiz, escena, cfg) {
-  const { g, gc, art, dedos, original, regiones } = preparar(escena, cfg);
+  const { g, gc, art, dedos, original, regiones, planos } = preparar(escena, cfg);
 
   // El esqueleto se arma con la raíz en el origen (pose de atadura)
   const posRaiz = raiz.position.clone();
@@ -503,25 +565,31 @@ export function autoRig(raiz, escena, cfg) {
       u.uUsaRemera.value = 1;
     }
   }
+  if (planos) prepararColoresPlanos(mat);
   const malla = new THREE.SkinnedMesh(g, mat);
   malla.castShadow = true;
   malla.receiveShadow = true;
   malla.frustumCulled = false;
   raiz.add(malla);
 
+  // Línea negra (contorno). Con `contorno: 0` en config.js el personaje va sin ella
+  // (en caras con detalles finos, inflar la malla puede deformarlas).
   const grosor = cfg.contorno ?? 0.011;
-  const contorno = new THREE.SkinnedMesh(gc, materialContornoPiel(grosor));
-  contorno.userData.esContorno = true;
-  contorno.userData.materialResaltado = materialContornoPiel(grosor * 1.3, 0xffd84a);
-  contorno.frustumCulled = false;
-  contorno.castShadow = false;
-  contorno.raycast = () => {};
-  raiz.add(contorno);
+  let contorno = null;
+  if (grosor > 0) {
+    contorno = new THREE.SkinnedMesh(gc, materialContornoPiel(grosor));
+    contorno.userData.esContorno = true;
+    contorno.userData.materialResaltado = materialContornoPiel(grosor * 1.3, 0xffd84a);
+    contorno.frustumCulled = false;
+    contorno.castShadow = false;
+    contorno.raycast = () => {};
+    raiz.add(contorno);
+  }
 
   raiz.updateMatrixWorld(true);
   const esqueleto = new THREE.Skeleton(huesos);
   malla.bind(esqueleto);
-  contorno.bind(esqueleto);
+  contorno?.bind(esqueleto);
 
   // Pose canónica: brazos colgando (rotación 0, como el placeholder), resto como el modelo
   for (const lado of ['I', 'D']) {

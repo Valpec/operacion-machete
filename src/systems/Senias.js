@@ -19,7 +19,7 @@ const elegir = (lista) => lista[Math.floor(Math.random() * lista.length)];
  * Para descifrar la seña hay que sostener la mirada ~1 s; con pánico alto es casi ilegible.
  */
 const ESCALA_CARTEL = 1.8; // el cartel de 0.2 x 0.15 m pasa a 0.36 x 0.27 m
-const ESCALA_MANO_SENIA = 1.6; // la mano de señas se agranda un poco para que se cuenten los dedos
+const ESCALA_MANO_SENIA = 1.1; // la mano de señas se agranda un poco para que se cuenten los dedos
 
 export class Senias {
   constructor({ personaje, profesora, camara, hud, examen, balance, resaltado }) {
@@ -165,9 +165,10 @@ export class Senias {
     this.revelar = null;
     if (this.p.animador.extra.munecaD) this.p.animador.extra.munecaD[2] = 0;
     this.p.mostrarDedos(0);
+    this.p.mostrarLapicera(true);
     this.p.escalarMano('brazoD', 1);
     this.p.orientarPalma('brazoD', null);
-    this.p.animador.pose('escribir', 5);
+    this.p.animador.pose('escribirFondo', 5);
     this.p.animador.capa('golpear', 0);
     this.mirarAlJugador(false);
     estado.accion.mirandoSenia = false;
@@ -203,6 +204,8 @@ export class Senias {
     // Los dedos no aparecen de golpe: sube el puño, se abren de a uno hasta el número y la mano "late"
     this.revelar = tipo === 'pedido' ? null : { n: opcion + 1, t: 0 };
     this.mostrarDedosSenia(0);
+    // La lapicera se guarda mientras hace la seña (si no, atraviesa la mano que cuenta dedos)
+    this.p.mostrarLapicera(false);
     this.p.escalarMano('brazoD', ESCALA_MANO_SENIA);
     this.dibujarCartel(tipo === 'pedido' ? `¿${pregunta + 1}?` : `${pregunta + 1}`);
     this.cartel.visible = true;
@@ -266,7 +269,7 @@ export class Senias {
       // (no cuenta como ignorada: no es culpa del jugador)
       this.volverAEscribir(azar(8, 14));
       this.p.animador.pose('disimular', 10);
-      setTimeout(() => this.fase === 'espera' && this.p.animador.pose('escribir', 4), 3500);
+      setTimeout(() => this.fase === 'espera' && this.p.animador.pose('escribirFondo', 4), 3500);
       return;
     }
 
@@ -327,7 +330,7 @@ export class Senias {
           this.hud.subtitulo(`[${this.nombre} te hace un gesto de reclamo]`);
           this.volverAEscribir();
           this.p.animador.pose('reclamo', 6);
-          setTimeout(() => this.p.animador.pose('escribir', 4), 1500);
+          setTimeout(() => this.p.animador.pose('escribirFondo', 4), 1500);
         }
         break;
     }

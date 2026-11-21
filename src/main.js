@@ -34,6 +34,7 @@ import { Panico } from './systems/Panico.js';
 import { Postprocesado } from './fx/Postprocesado.js';
 import { AudioManager } from './audio/AudioManager.js';
 import { Pantallas, cargarOpciones } from './ui/Pantallas.js';
+import { Calidad } from './core/Calidad.js';
 
 // ---------- Opciones del jugador (se recuerdan entre partidas si el navegador lo permite) ----------
 estado.opciones = {
@@ -43,6 +44,8 @@ estado.opciones = {
   volumenEfectos: 1,
   intensidadDesenfoque: 1,
   intensidadVibracion: 1,
+  calidad: 'auto',     // 'auto' | 'alta' | 'media' | 'baja'
+  mostrarFps: false,
 };
 cargarOpciones(estado.opciones);
 // Atajo para pruebas: ?escondite=manga|celular|cartuchera preselecciona el escondite
@@ -158,6 +161,9 @@ audio = game.agregar(new AudioManager({ camera: game.camera, profesora, elenco, 
 game.agregar({ update: (dt, t) => elenco.update(dt, t) });
 game.agregar(hud);
 game.agregar(debug);
+// Calidad gráfica (resolución, sombras, contornos del fondo) y contador de FPS
+const calidad = game.agregar(new Calidad({ game, aula, elenco, postpro, hud }));
+window.__calidad = calidad;
 intro = game.agregar(new Intro(game));
 
 // ---------- Pausa: al soltar el mouse (Esc) ----------

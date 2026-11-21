@@ -76,7 +76,7 @@ kbd {
 
 /* Subtítulos */
 .hud-subtitulos { bottom: 64px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 4px; }
-.subtitulo { background: rgba(0, 0, 0, 0.72); padding: 3px 10px; border-radius: 4px; font-size: 15px; white-space: nowrap; }
+.subtitulo { background: rgba(0, 0, 0, 0.72); padding: 3px 10px; border-radius: 4px; font-size: 17px; white-space: nowrap; }
 
 /* ================= Examen (modo hoja) ================= */
 .examen { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; visibility: hidden; opacity: 0; pointer-events: none; }
