@@ -7,6 +7,8 @@ import { toon, contorno } from '../world/materiales.js';
 
 const azar = (a, b) => a + Math.random() * (b - a);
 const elegir = (lista) => lista[Math.floor(Math.random() * lista.length)];
+// Altura mínima del papel desplegado al abrirlo (la tapa del banco termina a 0,76 m)
+const ALTURA_MIN_PAPEL_ABIERTO = 0.8;
 
 /**
  * Reto del mensajero (Tomi, esquina del fondo a la derecha) y física de los papelitos.
@@ -505,6 +507,8 @@ export class Papelitos {
       // Alejar el papel de la cámara para que las manos queden delante
       this.papelAbierto.position.copy(centro);
       this.papelAbierto.position.addScaledVector(haciaFondo, 0.045);
+      // Siempre por encima de la tapa del banco (si no, queda metido adentro y no se ve)
+      this.papelAbierto.position.y = Math.max(this.papelAbierto.position.y, ALTURA_MIN_PAPEL_ABIERTO);
 
       // Orientar la hoja hacia la cámara
       this.papelAbierto.lookAt(ojos);
