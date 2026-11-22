@@ -117,3 +117,6 @@ details { margin-top: 12px; }
   font-size: clamp(1.3rem, 2.2vw, 2rem); color: #e9e4da;
 }
 .cine-en-negro .cine-ayuda { margin-top: 18px; }
+
+/* Final de trampa: el resultado sobre el comedor, más apagado que el de mérito */
+.cine-trampa .cine-resultado { background: rgba(30, 20, 18, 0.5); }

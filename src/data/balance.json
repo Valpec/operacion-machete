@@ -250,7 +250,8 @@
     "ignoradosMinimos": 2,
     "demoraPasoProfesoraMerito": 5,
     "desvioFalloFinal": 0.55,
-    "factorVelocidadFalloFinal": 0.55
+    "factorVelocidadFalloFinal": 0.55,
+    "segundosMacheteParaTrampa": 2
   },
   "grupo": {
     "intervaloMin": 25,

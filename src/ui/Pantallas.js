@@ -129,6 +129,43 @@ function guionFinal(tipo, { notaPropia, correctas, aprobado }) {
       },
     ];
   }
+  if (tipo === 'trampa') {
+    return [
+      {
+        // Corte a negro: los amigos festejan en el pasillo
+        negro: true,
+        lineas: [
+          { texto: '🔔 Suena el timbre. Entregás la hoja.' },
+          { texto: 'En el pasillo, tus amigos te esperan.' },
+          { texto: '— ¡Salvados! Somos unos genios.', quien: NOMBRES.grupo },
+          { texto: '— Sin vos no la contábamos.', quien: NOMBRES.mensajero },
+        ],
+      },
+      {
+        // Comedor: los padres festejan y él no los puede mirar
+        imagen: 'trampa-1.png',
+        fondo: 'radial-gradient(circle at 50% 30%, #c98a55, #7a4428 60%, #3a2118)',
+        lineas: [
+          { texto: 'Esa noche, el mismo comedor.' },
+          { texto: 'Les mostrás la hoja.' },
+          { texto: '— ¡Aprobaste! ¿Viste que podías?', quien: 'Mamá' },
+          { texto: '— Contame, ¿cuál fue la que más te costó?', quien: 'Papá' },
+          { texto: 'No sabés qué contestar. Las que más te costaron no las hiciste vos.' },
+        ],
+      },
+      {
+        // Corte a negro: el chat del grupo
+        negro: true,
+        lineas: [
+          { texto: 'El celular vibra sobre la mesa. El grupo «Operación Machete»:' },
+          { texto: 'el viernes hay Física 👀', quien: NOMBRES.grupo },
+          { texto: '¿Operación Machete 2?', quien: NOMBRES.mensajero },
+          { texto: 'obvio, vos hacés el machete 😎', quien: NOMBRES.senias },
+          { texto: 'Para ellos no sos un amigo. Sos el machete.' },
+        ],
+      },
+    ];
+  }
   return null; // el final neutral sigue siendo la tarjeta de texto
 }
 
@@ -434,7 +471,7 @@ export class Pantallas {
 
   // Precarga los dibujos para que el fundido no espere a que bajen
   precargarFinales() {
-    for (const f of ['traicion-1.png', 'traicion-2.png', 'merito-1.png', 'merito-2.png', 'merito-3.png']) {
+    for (const f of ['traicion-1.png', 'traicion-2.png', 'merito-1.png', 'merito-2.png', 'merito-3.png', 'trampa-1.png']) {
       const img = new Image();
       img.src = RUTA_FINALES + f;
     }
@@ -539,6 +576,9 @@ export class Pantallas {
       cierre = aprobado
         ? 'Aprobaste por mérito propio.<br><small>Ser fiel a vos mismo a veces tiene un precio. Prometer de más, también.</small>'
         : 'Desaprobaste, pero sin deberle nada a nadie.<br><small>Prometer de más también tiene un precio.</small>';
+    } else if (tipo === 'trampa') {
+      titulo = 'Aprobado… ¿por quién?';
+      cierre = 'Aprobaste. Pero esa nota no es tuya.<br><small>La trampa no termina cuando entregás la hoja.</small>';
     } else {
       titulo = 'Se terminó el examen';
       cierre = aprobado ? 'Aprobaste.' : 'Desaprobaste.';

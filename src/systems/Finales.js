@@ -12,7 +12,10 @@ import { NOMBRES } from '../characters/config.js';
  *    dice que se quede al terminar la clase (el final ilustrado es esa charla, con el aula vacía).
  *  - Camino 2 (mérito propio): guardar el machete (G) o ignorar señas y papelitos mucho tiempo.
  *    Los amigos muestran bronca, la profesora pasa junto al banco y sigue de largo.
- *  - Final neutral: se termina el tiempo (o entregás) sin que se active ningún camino.
+ *  - Final de trampa: se termina el examen sin que se active ningún camino, aprobaste y en algún
+ *    momento hiciste trampa (machete, señas o papelitos). Nadie te descubrió, pero la nota no es tuya.
+ *  - Final neutral: se termina el tiempo (o entregás) sin que se active ningún camino y sin aprobar
+ *    con trampa.
  */
 export class Finales {
   constructor({ input, camara, profesora, elenco, aula, examen, papelitos, senias, grupo, hud, panelExamen, pantallas, balance }) {
@@ -154,10 +157,19 @@ export class Finales {
   // ---------- Fin del examen (entregar o tiempo) ----------
   alTerminarExamen() {
     if (estado.camino === 'traicion') return; // la secuencia se encarga
-    const tipo = estado.camino === 'merito' ? 'merito' : 'neutral';
+    let tipo = 'neutral';
+    if (estado.camino === 'merito') tipo = 'merito';
+    else if (this.examen.aprobado && this.hizoTrampa()) tipo = 'trampa';
     bus.emit('timbre');
-    estado.tonoFinal = tipo === 'merito' ? 'calido' : null;
+    estado.tonoFinal = tipo === 'neutral' ? null : 'calido';
     this.terminar(tipo);
+  }
+
+  // Usó el machete un rato, leyó o contestó señas, o devolvió papelitos
+  hizoTrampa() {
+    const r = estado.registro;
+    return r.tiempoMachete >= this.b.segundosMacheteParaTrampa
+      || r.seniasLeidas > 0 || r.seniasRespondidas > 0 || r.papelitosDevueltos > 0;
   }
 
   terminar(tipo) {
