@@ -49,7 +49,7 @@ function guardarOpciones(opciones) {
 // así se puede probar el texto antes de tener el dibujo: alcanza con agregar el PNG y recargar.
 const RUTA_FINALES = `${import.meta.env.BASE_URL}finales/`;
 
-function guionFinal(tipo, { notaPropia, correctas, aprobado }) {
+function guionFinal(tipo, { notaPropia, correctas }) {
   if (tipo === 'traicion') {
     const loSuyo = correctas > 0
       ? `— Las que hiciste vos estaban bien. Con lo tuyo ibas por un ${notaPropia}.`
@@ -105,17 +105,11 @@ function guionFinal(tipo, { notaPropia, correctas, aprobado }) {
         // Comedor: los mirás a la cara
         imagen: 'merito-2.png',
         fondo: 'radial-gradient(circle at 50% 30%, #ffd9a0, #c8743a 60%, #5a3828)',
-        lineas: aprobado
-          ? [
-              { texto: 'Esa noche, el mismo comedor. La mesa ya no tiene apuntes.' },
-              { texto: 'Les mostrás la nota. Y por primera vez, los mirás a la cara.' },
-              { texto: '— ¿Viste que podías?', quien: 'Mamá' },
-            ]
-          : [
-              { texto: 'Esa noche, el mismo comedor. La mesa ya no tiene apuntes.' },
-              { texto: 'Les mostrás la nota. No alcanzó. Pero por primera vez, los mirás a la cara: cada respuesta fue tuya.' },
-              { texto: '— La próxima sale. Esta vez estudiaste de verdad.', quien: 'Papá' },
-            ],
+        lineas: [
+          { texto: 'Esa noche, el mismo comedor. La mesa ya no tiene apuntes.' },
+          { texto: 'Les mostrás la nota. Y por primera vez, los mirás a la cara.' },
+          { texto: '— ¿Viste que podías?', quien: 'Mamá' },
+        ],
       },
       {
         // Bajás la mirada al celular y te acordás de tus amigos
@@ -553,35 +547,40 @@ export class Pantallas {
   }
 
   mostrarTarjetaFinal(datos) {
-    const { tipo, aprobado } = datos;
-    const lineas = [
-      '🔔 Suena el timbre.',
-      'Entregás la hoja entre señas, papelitos y miradas de reojo.',
-      'Nadie te descubrió… y tampoco terminaste de decidir de qué lado estabas.',
-    ];
+    const { tipo, eligioMerito } = datos;
+    const lineas = eligioMerito
+      ? [
+          '🔔 Suena el timbre.',
+          'Guardaste el machete y lo intentaste solo.',
+          'Esta vez no alcanzó… pero cada respuesta fue tuya.',
+        ]
+      : [
+          '🔔 Suena el timbre.',
+          'Entregás la hoja entre señas, papelitos y miradas de reojo.',
+          'Nadie te descubrió… y tampoco terminaste de decidir de qué lado estabas.',
+        ];
     this.final = this.div(`pantalla menu pantalla-final pantalla-${tipo}`, this.htmlTarjetaFinal(datos, lineas));
     this.final.style.cursor = 'default';
     this.final.querySelector('[data-accion="denuevo"]').addEventListener('click', () => recargarSinIntro());
   }
 
   // Tarjeta con título, nota, cierre y estadísticas. `lineas` (opcional) es el texto narrado.
-  htmlTarjetaFinal({ tipo, nota, notaPropia, correctas, total, aprobado, estadisticas: s }, lineas) {
+  htmlTarjetaFinal({ tipo, nota, notaPropia, correctas, total, aprobado, eligioMerito, estadisticas: s }, lineas) {
     let titulo;
     let cierre;
     if (tipo === 'traicion') {
       titulo = 'Examen anulado';
       cierre = `Desaprobaste una materia que sabías resolver.<br><small>Con lo que habías respondido vos solo ibas por un <b>${notaPropia}</b>.</small>`;
     } else if (tipo === 'merito') {
-      titulo = aprobado ? 'Aprobado por mérito propio' : 'Lo hiciste por tu cuenta';
-      cierre = aprobado
-        ? 'Aprobaste por mérito propio.<br><small>Ser fiel a vos mismo a veces tiene un precio. Prometer de más, también.</small>'
-        : 'Desaprobaste, pero sin deberle nada a nadie.<br><small>Prometer de más también tiene un precio.</small>';
+      titulo = 'Aprobado por mérito propio';
+      cierre = 'Aprobaste por mérito propio.<br><small>Ser fiel a vos mismo a veces tiene un precio. Prometer de más, también.</small>';
     } else if (tipo === 'trampa') {
       titulo = 'Aprobado… ¿por quién?';
       cierre = 'Aprobaste. Pero esa nota no es tuya.<br><small>La trampa no termina cuando entregás la hoja.</small>';
     } else {
       titulo = 'Se terminó el examen';
       cierre = aprobado ? 'Aprobaste.' : 'Desaprobaste.';
+      if (eligioMerito && !aprobado) cierre = 'Desaprobaste, pero sin deberle nada a nadie.<br><small>La próxima, con lo que aprendiste hoy, puede alcanzar.</small>';
     }
     const n = lineas?.length ?? 0;
     return `

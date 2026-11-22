@@ -11,7 +11,8 @@ import { NOMBRES } from '../characters/config.js';
  *    la profesora gira, los amigos disimulan, ella camina hasta el banco, retira el examen y le
  *    dice que se quede al terminar la clase (el final ilustrado es esa charla, con el aula vacía).
  *  - Camino 2 (mérito propio): guardar el machete (G) o ignorar señas y papelitos mucho tiempo.
- *    Los amigos muestran bronca, la profesora pasa junto al banco y sigue de largo.
+ *    Los amigos muestran bronca, la profesora pasa junto al banco y sigue de largo. El final
+ *    ilustrado de mérito sale sólo si aprobás; si desaprobás, sale el neutral.
  *  - Final de trampa: se termina el examen sin que se active ningún camino, aprobaste y en algún
  *    momento hiciste trampa (machete, señas o papelitos). Nadie te descubrió, pero la nota no es tuya.
  *  - Final neutral: se termina el tiempo (o entregás) sin que se active ningún camino y sin aprobar
@@ -157,8 +158,10 @@ export class Finales {
   // ---------- Fin del examen (entregar o tiempo) ----------
   alTerminarExamen() {
     if (estado.camino === 'traicion') return; // la secuencia se encarga
+    // El final de mérito es sólo para cuando aprobás (los dibujos muestran la hoja aprobada).
+    // Si elegiste hacerlo solo pero no alcanzó, sale el neutral con un texto propio.
     let tipo = 'neutral';
-    if (estado.camino === 'merito') tipo = 'merito';
+    if (estado.camino === 'merito') tipo = this.examen.aprobado ? 'merito' : 'neutral';
     else if (this.examen.aprobado && this.hizoTrampa()) tipo = 'trampa';
     bus.emit('timbre');
     estado.tonoFinal = tipo === 'neutral' ? null : 'calido';
@@ -187,6 +190,7 @@ export class Finales {
       correctas: ex.correctas,
       total: ex.preguntas.length,
       aprobado: ex.aprobado,
+      eligioMerito: estado.camino === 'merito',
       estadisticas: {
         seniasLeidas: r.seniasLeidas,
         seniasRespondidas: r.seniasRespondidas,
