@@ -8,7 +8,8 @@ import { NOMBRES } from '../characters/config.js';
  *  - Camino 1 (traición del grupo): el compromiso supera el umbral -> reto final con un pedido
  *    urgente de Tomi y la profesora rondando el centro. El lanzamiento falla por el temblor
  *    (o cualquier descubrimiento con sospecha al 100 lleva directo acá). Secuencia: el papel cae,
- *    la profesora gira, los amigos disimulan, ella camina hasta el banco y retira el examen.
+ *    la profesora gira, los amigos disimulan, ella camina hasta el banco, retira el examen y le
+ *    dice que se quede al terminar la clase (el final ilustrado es esa charla, con el aula vacía).
  *  - Camino 2 (mérito propio): guardar el machete (G) o ignorar señas y papelitos mucho tiempo.
  *    Los amigos muestran bronca, la profesora pasa junto al banco y sigue de largo.
  *  - Final neutral: se termina el tiempo (o entregás) sin que se active ningún camino.
@@ -84,8 +85,14 @@ export class Finales {
       limite -= 0.1;
     }
     await this.esperar(0.6);
-    this.hud.subtitulo('Profesora: — Dame la hoja. Esto queda anulado.', 3.5);
+    this.hud.subtitulo('Profesora: — Dame la hoja. Esto queda anulado.', 3);
     bus.emit('profesoraHabla', { segundos: 2.5 });
+    // Deja planteada la escena del final: ella se queda a hablar con él cuando el aula se vacía
+    this.esperar(3.1).then(() => {
+      if (estado.final) return;
+      this.hud.subtitulo('Profesora: — Y vos te quedás cuando termine la clase.', 3.5);
+      bus.emit('profesoraHabla', { segundos: 2 });
+    });
     this.ia.retirarExamen();
     await this.esperar(0.8);
     // La hoja del banco pasa a la mano de la profesora
@@ -102,7 +109,7 @@ export class Finales {
     }
     await this.esperar(1.0);
     this.ia.p.animador.pose('parado', 3);
-    await this.esperar(1.6);
+    await this.esperar(4.2); // tiempo para leer "Y vos te quedás cuando termine la clase"
 
     // Pantalla de final: timbre, los amigos se van sin defenderlo, aula vacía
     await this.pantallas.fundido(true, 1.2);

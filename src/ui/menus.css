@@ -76,3 +76,44 @@ details { margin-top: 12px; }
   position: absolute; right: 14px; bottom: 14px; padding: 3px 8px; border-radius: 6px;
   background: rgba(10, 12, 20, 0.7); color: #b6f5b6; font: 12px/1.4 Consolas, 'Courier New', monospace; pointer-events: none;
 }
+
+/* Finales ilustrados: dibujo a pantalla completa, texto abajo como subtítulo y fundido entre escenas */
+.cine { background: #000; display: block; }
+.cine-escenas, .cine-escena { position: absolute; inset: 0; }
+.cine-escena { opacity: 0; transition: opacity 1.8s ease; }
+.cine-escena.activa { opacity: 1; }
+.cine-escena img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cine-texto {
+  position: absolute; left: 50%; bottom: 6vh; transform: translateX(-50%);
+  width: min(900px, calc(100% - 48px)); text-align: center; pointer-events: none;
+}
+.cine-linea {
+  display: inline-block; margin: 0; padding: 14px 26px; border-radius: 10px;
+  background: rgba(12, 14, 24, 0.72); color: #f5f1e8;
+  font-size: clamp(1.05rem, 1.6vw, 1.45rem); line-height: 1.45;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35); opacity: 0;
+}
+.cine-linea:empty { display: none; }
+.cine-linea.visible { animation: aparecer 0.7s ease forwards; }
+.cine-linea b { color: #ffd9a0; }
+.cine-traicion .cine-linea b { color: #f0a3a3; }
+.cine-ayuda { display: block; margin-top: 8px; font-size: 12px; color: rgba(245, 241, 232, 0.55); }
+.cine-saltar {
+  position: absolute; top: 18px; right: 18px; padding: 6px 14px; border-radius: 6px; cursor: pointer;
+  background: rgba(12, 14, 24, 0.55); color: #f5f1e8; border: 1px solid rgba(245, 241, 232, 0.35); font: inherit; font-size: 13px;
+}
+.cine-saltar:hover { background: rgba(12, 14, 24, 0.8); }
+.cine-resultado {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  background: rgba(10, 12, 20, 0.45); animation: aparecer 1s ease forwards;
+}
+.cine-merito .cine-resultado { background: rgba(60, 35, 20, 0.35); }
+
+/* Escenas en negro: texto centrado, sin caja, como los carteles de la intro */
+.cine-escena-negra { background: #000; }
+.cine-en-negro .cine-texto { bottom: auto; top: 50%; transform: translate(-50%, -50%); }
+.cine-en-negro .cine-linea {
+  background: none; box-shadow: none; padding: 0 12px;
+  font-size: clamp(1.3rem, 2.2vw, 2rem); color: #e9e4da;
+}
+.cine-en-negro .cine-ayuda { margin-top: 18px; }

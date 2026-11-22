@@ -42,6 +42,99 @@ function guardarOpciones(opciones) {
   }
 }
 
+// ---------- Finales ilustrados ----------
+// Cada final es una secuencia de escenas: un dibujo a pantalla completa y las líneas que aparecen
+// abajo, como subtítulos. Entre una escena y la siguiente hay un fundido cruzado.
+// Los dibujos van en public/finales/. Si un archivo no existe, se usa el color de fondo (`fondo`),
+// así se puede probar el texto antes de tener el dibujo: alcanza con agregar el PNG y recargar.
+const RUTA_FINALES = `${import.meta.env.BASE_URL}finales/`;
+
+function guionFinal(tipo, { notaPropia, correctas, aprobado }) {
+  if (tipo === 'traicion') {
+    const loSuyo = correctas > 0
+      ? `— Las que hiciste vos estaban bien. Con lo tuyo ibas por un ${notaPropia}.`
+      : '— Ni lo intentaste solo. Y yo sé que podías.';
+    return [
+      {
+        // Corte a negro: los amigos se van (no se ve el dibujo, sólo el texto centrado como en la intro)
+        negro: true,
+        lineas: [
+          { texto: '🔔 Suena el timbre.' },
+          { texto: `${NOMBRES.senias}, ${NOMBRES.mensajero} y ${NOMBRES.grupo} pasan al lado de tu banco.` },
+          { texto: '— Uh, qué mala suerte tuviste, quedaste re regalado ahí.', quien: NOMBRES.mensajero },
+          { texto: 'Se van riéndose.' },
+        ],
+      },
+      {
+        // Escena 1, reto: le habla en serio
+        imagen: 'traicion-1.png',
+        fondo: 'linear-gradient(160deg, #2c3a55, #4b5d7a 55%, #2a3248)',
+        lineas: [
+          { texto: 'El aula se vacía. La única que se queda es ella.' },
+          { texto: loSuyo, quien: 'Profesora' },
+          { texto: '— No me preocupa este parcial. Me preocupa que te acostumbres.', quien: 'Profesora' },
+        ],
+      },
+      {
+        // Escena 1, reto 2: te mira fijo y se ilumina el fondo (las palabras sabias)
+        imagen: 'traicion-2.png',
+        fondo: 'radial-gradient(circle at 60% 40%, #f2c98a, #8a7a8c 55%, #34405a)',
+        destello: true,
+        lineas: [
+          { texto: '— Lo fácil sale barato una vez. Después lo pagás todo junto.', quien: 'Profesora' },
+          { texto: '— Copiarse no te ahorra el esfuerzo. Te lo deja para más adelante, y con intereses.', quien: 'Profesora' },
+          { texto: 'De todos los que estaban en el aula, la única que se quedó fue la que te anuló.' },
+        ],
+      },
+    ];
+  }
+  if (tipo === 'merito') {
+    return [
+      {
+        // Pasillo vacío
+        imagen: 'merito-1.png',
+        fondo: 'linear-gradient(170deg, #9aa6b4, #c9ccd0 60%, #7c8592)',
+        lineas: [
+          { texto: '🔔 Suena el timbre. Entregás la hoja.' },
+          { texto: 'Tus amigos no te esperaron a la salida.' },
+          { texto: 'En el celular, el grupo «Operación Machete»: <i>gracias por nada.</i>' },
+          { texto: `<b>${NOMBRES.mensajero} te eliminó del grupo.</b>` },
+        ],
+      },
+      {
+        // Comedor: los mirás a la cara
+        imagen: 'merito-2.png',
+        fondo: 'radial-gradient(circle at 50% 30%, #ffd9a0, #c8743a 60%, #5a3828)',
+        lineas: aprobado
+          ? [
+              { texto: 'Esa noche, el mismo comedor. La mesa ya no tiene apuntes.' },
+              { texto: 'Les mostrás la nota. Y por primera vez, los mirás a la cara.' },
+              { texto: '— ¿Viste que podías?', quien: 'Mamá' },
+            ]
+          : [
+              { texto: 'Esa noche, el mismo comedor. La mesa ya no tiene apuntes.' },
+              { texto: 'Les mostrás la nota. No alcanzó. Pero por primera vez, los mirás a la cara: cada respuesta fue tuya.' },
+              { texto: '— La próxima sale. Esta vez estudiaste de verdad.', quien: 'Papá' },
+            ],
+      },
+      {
+        // Bajás la mirada al celular y te acordás de tus amigos
+        imagen: 'merito-3.png',
+        fondo: 'radial-gradient(circle at 50% 70%, #b7cde6, #a2603a 55%, #3a241a)',
+        lineas: [
+          { texto: 'Pero lo que te pesa no es la materia: es haber dicho que sí a algo que sabías que no ibas a cumplir.' },
+          { texto: 'Antes de dormir, les escribís: <i>«perdón. no tendría que haber dicho que sí. para el recu, si quieren, estudiamos juntos.»</i>' },
+          { texto: 'Visto. Nadie contesta. Todavía.' },
+        ],
+      },
+    ];
+  }
+  return null; // el final neutral sigue siendo la tarjeta de texto
+}
+
+// Tiempo que queda cada línea en pantalla si el jugador no la adelanta
+const duracionLinea = (texto) => 2.6 + texto.replace(/<[^>]+>/g, '').length * 0.05;
+
 const ESCONDITES = [
   { id: 'cartuchera', icono: '✏️', nombre: 'Cartuchera', pro: 'Silenciosa', contra: 'Tarda más en abrirse' },
   { id: 'manga', icono: '👕', nombre: 'Manga del buzo', pro: 'Rapidísima', contra: 'El gesto se nota más' },
@@ -75,6 +168,7 @@ export class Pantallas {
     this.crearPausa();
     this.crearOpciones();
     this.fundidoEl = this.div('fundido');
+    this.precargarFinales();
   }
 
   div(clase, html = '') {
@@ -331,45 +425,130 @@ export class Pantallas {
   }
 
   // ---------- Finales ----------
-  mostrarFinal({ tipo, nota, notaPropia, correctas, total, aprobado, estadisticas: s }) {
+  mostrarFinal(datos) {
+    this.pausa.style.display = 'none';
+    const escenas = guionFinal(datos.tipo, datos);
+    if (escenas) this.mostrarFinalIlustrado(datos, escenas);
+    else this.mostrarTarjetaFinal(datos);
+  }
+
+  // Precarga los dibujos para que el fundido no espere a que bajen
+  precargarFinales() {
+    for (const f of ['traicion-1.png', 'traicion-2.png', 'merito-1.png', 'merito-2.png', 'merito-3.png']) {
+      const img = new Image();
+      img.src = RUTA_FINALES + f;
+    }
+  }
+
+  async mostrarFinalIlustrado(datos, escenas) {
+    const { tipo } = datos;
+    const el = this.div(`pantalla cine cine-${tipo}`, `
+      <div class="cine-escenas">
+        ${escenas.map((e) => (e.negro
+          ? '<div class="cine-escena cine-escena-negra"></div>'
+          : `<div class="cine-escena" style="background:${e.fondo}">
+          <img src="${RUTA_FINALES}${e.imagen}" alt="" draggable="false">
+        </div>`)).join('')}
+      </div>
+      <div class="cine-texto"><p class="cine-linea"></p><span class="cine-ayuda">Clic o Espacio para seguir</span></div>
+      <button class="cine-saltar">Saltar ▸▸</button>`);
+    el.style.cursor = 'default';
+    this.final = el;
+    // Si falta un dibujo, queda el fondo de color de esa escena
+    el.querySelectorAll('.cine-escena img').forEach((img) => {
+      img.addEventListener('error', () => img.remove());
+    });
+
+    const capas = [...el.querySelectorAll('.cine-escena')];
+    const linea = el.querySelector('.cine-linea');
+    let saltar = false;
+    let avanzar = null;
+    const seguir = () => avanzar?.();
+    const teclas = (e) => {
+      if (e.code === 'Space' || e.code === 'Enter') {
+        e.preventDefault();
+        seguir();
+      }
+    };
+    el.addEventListener('click', seguir);
+    window.addEventListener('keydown', teclas);
+    el.querySelector('.cine-saltar').addEventListener('click', (e) => {
+      e.stopPropagation();
+      saltar = true;
+      seguir();
+    });
+    // Espera a que pase el tiempo o a que el jugador adelante (lo que ocurra primero)
+    const esperar = (segundos) => new Promise((resolver) => {
+      const t = setTimeout(() => { avanzar = null; resolver(); }, segundos * 1000);
+      avanzar = () => { clearTimeout(t); avanzar = null; resolver(); };
+    });
+
+    void el.offsetWidth; // para que el primer dibujo aparezca con fundido
+    for (let i = 0; i < escenas.length && !saltar; i++) {
+      capas.forEach((c, j) => c.classList.toggle('activa', j === i));
+      // En negro el texto va centrado y grande, como los carteles de la intro
+      el.classList.toggle('cine-en-negro', !!escenas[i].negro);
+      linea.classList.remove('visible');
+      if (escenas[i].destello) bus.emit('destelloMemoria');
+      await esperar(escenas[i].negro ? 0.8 : i === 0 ? 1.4 : 1.8); // deja ver el dibujo antes del texto
+      for (const l of escenas[i].lineas) {
+        if (saltar) break;
+        linea.classList.remove('visible');
+        linea.innerHTML = l.quien ? `<b>${l.quien}:</b> ${l.texto}` : l.texto;
+        void linea.offsetWidth; // reinicia la animación
+        linea.classList.add('visible');
+        await esperar(duracionLinea(l.texto));
+      }
+    }
+
+    window.removeEventListener('keydown', teclas);
+    el.removeEventListener('click', seguir);
+    capas.forEach((c, j) => c.classList.toggle('activa', j === capas.length - 1));
+    el.classList.remove('cine-en-negro');
+    el.querySelector('.cine-texto').remove();
+    el.querySelector('.cine-saltar').remove();
+    // Al final aparece la tarjeta con la nota, encima del último dibujo
+    const tarjeta = document.createElement('div');
+    tarjeta.className = 'cine-resultado';
+    tarjeta.innerHTML = this.htmlTarjetaFinal(datos, null);
+    el.appendChild(tarjeta);
+    tarjeta.querySelector('[data-accion="denuevo"]').addEventListener('click', () => recargarSinIntro());
+  }
+
+  mostrarTarjetaFinal(datos) {
+    const { tipo, aprobado } = datos;
+    const lineas = [
+      '🔔 Suena el timbre.',
+      'Entregás la hoja entre señas, papelitos y miradas de reojo.',
+      'Nadie te descubrió… y tampoco terminaste de decidir de qué lado estabas.',
+    ];
+    this.final = this.div(`pantalla menu pantalla-final pantalla-${tipo}`, this.htmlTarjetaFinal(datos, lineas));
+    this.final.style.cursor = 'default';
+    this.final.querySelector('[data-accion="denuevo"]').addEventListener('click', () => recargarSinIntro());
+  }
+
+  // Tarjeta con título, nota, cierre y estadísticas. `lineas` (opcional) es el texto narrado.
+  htmlTarjetaFinal({ tipo, nota, notaPropia, correctas, total, aprobado, estadisticas: s }, lineas) {
     let titulo;
-    let lineas;
     let cierre;
     if (tipo === 'traicion') {
       titulo = 'Examen anulado';
-      lineas = [
-        '🔔 Suena el timbre.',
-        'Tus amigos agarran sus cosas y pasan al lado de tu banco.',
-        'Nadie dice nada para defenderte.',
-        `<i>— Uh, qué mala suerte tuviste, quedaste re regalado ahí.</i>`,
-        'Se van. El aula queda vacía.',
-      ];
       cierre = `Desaprobaste una materia que sabías resolver.<br><small>Con lo que habías respondido vos solo ibas por un <b>${notaPropia}</b>.</small>`;
     } else if (tipo === 'merito') {
       titulo = aprobado ? 'Aprobado por mérito propio' : 'Lo hiciste por tu cuenta';
-      lineas = [
-        '🔔 Suena el timbre.',
-        'Entregás la hoja y salís sin mirar hacia las esquinas.',
-        'Volvés a tu casa tranquilo.',
-        aprobado
-          ? `<i>— ¡Felicitaciones! Sabíamos que podías.</i> Tus viejos te reciben con un abrazo.`
-          : 'Esta vez no alcanzó, pero cada respuesta fue tuya. Con lo que estudiaste, la próxima sale.',
-      ];
-      cierre = aprobado ? 'Aprobaste por mérito propio.' : 'Desaprobaste, pero sin deberle nada a nadie.';
+      cierre = aprobado
+        ? 'Aprobaste por mérito propio.<br><small>Ser fiel a vos mismo a veces tiene un precio. Prometer de más, también.</small>'
+        : 'Desaprobaste, pero sin deberle nada a nadie.<br><small>Prometer de más también tiene un precio.</small>';
     } else {
       titulo = 'Se terminó el examen';
-      lineas = [
-        '🔔 Suena el timbre.',
-        'Entregás la hoja entre señas, papelitos y miradas de reojo.',
-        'Nadie te descubrió… y tampoco terminaste de decidir de qué lado estabas.',
-      ];
       cierre = aprobado ? 'Aprobaste.' : 'Desaprobaste.';
     }
-    const html = `
+    const n = lineas?.length ?? 0;
+    return `
       <div class="tarjeta final final-${tipo}">
         <h1>${titulo}</h1>
-        <div class="lineas">${lineas.map((l, i) => `<p style="animation-delay:${0.6 + i * 1.1}s">${l}</p>`).join('')}</div>
-        <div class="resultado-final" style="animation-delay:${0.8 + lineas.length * 1.1}s">
+        ${n ? `<div class="lineas">${lineas.map((l, i) => `<p style="animation-delay:${0.6 + i * 1.1}s">${l}</p>`).join('')}</div>` : ''}
+        <div class="resultado-final" style="animation-delay:${n ? 0.8 + n * 1.1 : 0.3}s">
           <div class="nota-final"><span>Nota</span><b>${nota}</b><span>${tipo === 'traicion' ? 'anulado' : `${correctas} de ${total} correctas`}</span></div>
           <p class="cierre">${cierre}</p>
           <ul class="estadisticas">
@@ -380,9 +559,5 @@ export class Pantallas {
           <button class="boton-grande" data-accion="denuevo">Jugar de nuevo</button>
         </div>
       </div>`;
-    this.final = this.div(`pantalla menu pantalla-final pantalla-${tipo}`, html);
-    this.final.style.cursor = 'default';
-    this.final.querySelector('[data-accion="denuevo"]').addEventListener('click', () => recargarSinIntro());
-    this.pausa.style.display = 'none';
   }
 }
